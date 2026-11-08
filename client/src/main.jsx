@@ -11,6 +11,7 @@ import MyCases from './pages/MyCases.jsx';
 import BulkUpload from './pages/BulkUpload.jsx';
 import MasterData from './pages/MasterData.jsx';
 import ComingSoon from './pages/ComingSoon.jsx';
+import Glossary from './pages/Glossary.jsx';
 
 function Protected({ children, admin }) {
   const { user, loading } = useAuth();
@@ -32,6 +33,7 @@ function App() {
         <Route path="/edd/master" element={<MasterData />} />
         <Route path="/users" element={<Protected admin><Users /></Protected>} />
         <Route path="/module/:slug" element={<ComingSoon />} />
+        <Route path="/glossary" element={<Glossary />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

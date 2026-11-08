@@ -30,8 +30,8 @@ export default function Login() {
         </p>
         <div className="module-list">
           <div>🛡️ Enhanced Due Diligence</div><div>🎯 True Match</div>
-          <div>📡 Hyper Monitoring</div><div>🚩 Red Flag</div>
-          <div style={{ gridColumn: '1/-1' }}>🕵️ Suspicious Activity Reported</div>
+          <div>📡 Heightened Monitoring</div><div>🚩 Red Flag</div>
+          <div style={{ gridColumn: '1/-1' }}>🕵️ Suspicious Activity Report</div>
         </div>
       </section>
       <section className="login-panel">
@@ -47,7 +47,7 @@ export default function Login() {
               <input id="login-password" className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </div>
             <button id="btn-login" className="btn btn-primary" disabled={busy} style={{ padding: 12 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-            <p className="muted" style={{ fontSize: 12, textAlign: 'center', margin: 0 }}>Default admin: admin@edd.local / admin123</p>
+            <p className="muted" style={{ fontSize: 12, textAlign: 'center', margin: 0 }}>Admin: admin@edd.local / admin123 · Team: firstname@edd.local / Welcome@123</p>
           </div>
         </form>
       </section>

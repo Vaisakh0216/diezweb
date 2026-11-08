@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export function Modal({ title, children, onClose, footer, wide }) {
   return (
@@ -12,22 +12,37 @@ export function Modal({ title, children, onClose, footer, wide }) {
   );
 }
 
+const STATUS_CLS = { Requested: 'progress', Approved: 'done', 'Returned for reupload': 'pending' };
 export function StatusBadge({ status }) {
-  const cls = { Pending: 'pending', 'In Progress': 'progress', Completed: 'done' }[status] || '';
-  return <span className={`badge ${cls}`}>{status}</span>;
+  return <span className={`badge ${STATUS_CLS[status] || ''}`}>{status || 'Open'}</span>;
+}
+export function RiskBadge({ risk }) {
+  if (!risk) return <span className="muted">—</span>;
+  return <span className={`badge ${risk === 'High' ? 'leave' : 'pending'}`}>{risk}</span>;
 }
 
-/** Derive a compact summary of a row's original data for table display */
-export function dataSummary(data, max = 3) {
-  return Object.entries(data).slice(0, max).map(([k, v]) => `${k}: ${v}`).join(' · ');
-}
-
-/** Build a dynamic list of data columns across cases (first N keys seen) */
-export function dataColumns(cases, skip = [], max = 5) {
-  const keys = [];
-  for (const c of cases) for (const k of Object.keys(c.data)) {
-    if (!keys.includes(k) && !skip.includes(k)) keys.push(k);
-    if (keys.length >= max) return keys;
-  }
-  return keys;
+/** Compact multi-select dropdown with checkboxes */
+export function MultiSelect({ options, value, onChange, placeholder = 'Select…', disabled, id }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef();
+  useEffect(() => {
+    const h = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const toggle = (o) => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o]);
+  return (
+    <div className="ms" ref={ref}>
+      <button type="button" id={id} className={`input ms-btn ${value.length ? '' : 'ms-empty'}`} disabled={disabled} onClick={() => setOpen(!open)}>
+        {value.length ? value.join(', ') : placeholder}
+      </button>
+      {open && (
+        <div className="ms-pop">
+          {options.map((o) => (
+            <label key={o} className="ms-opt"><input type="checkbox" checked={value.includes(o)} onChange={() => toggle(o)} /> {o}</label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }

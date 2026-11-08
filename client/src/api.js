@@ -24,8 +24,11 @@ export const qs = (o) => {
   return s ? `?${s}` : '';
 };
 
-export const DUTIES = ['License Renewal', 'Test1', 'Test2', 'Test3', 'Others'];
-export const STATUSES = ['Pending', 'In Progress', 'Completed'];
+export const fmtDate = (s) => {
+  if (!s) return '';
+  const [y, m, d] = String(s).slice(0, 10).split('-');
+  return d ? `${d}/${m}/${y}` : s;
+};
 
 export function exportCSV(filename, rows, columns) {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;

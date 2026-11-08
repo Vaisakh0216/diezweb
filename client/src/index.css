@@ -191,3 +191,30 @@ tbody tr.selected { background: hsla(252 90% 67% / .1); }
   .main { padding: 20px; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- v2 additions ---------- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; flex-wrap: wrap; }
+.tab { padding: 10px 16px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter'; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; display: flex; gap: 8px; align-items: center; }
+.tab:hover { color: var(--text); }
+.tab.on { color: var(--text); border-bottom-color: var(--primary); }
+.count { font-size: 11px; padding: 1px 8px; border-radius: 20px; background: hsla(225 40% 70% / .12); }
+.tab.on .count { background: var(--grad); }
+.seg { display: inline-flex; padding: 4px; border-radius: 12px; background: hsla(228 30% 6% / .6); border: 1px solid var(--border); gap: 4px; }
+.seg button { border: none; background: none; color: var(--muted); padding: 8px 14px; border-radius: 9px; font: 600 13px 'Inter'; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.seg button.on { background: hsla(252 90% 67% / .2); color: var(--text); }
+.ms { position: relative; min-width: 180px; }
+.ms-btn { text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; padding: 6px 10px; font-size: 13px; }
+.ms-empty { color: var(--muted); }
+.ms-pop { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 220px; background: var(--surface-solid); border: 1px solid var(--border-strong); border-radius: 12px; padding: 6px; box-shadow: var(--shadow); max-height: 280px; overflow: auto; animation: rise .15s; }
+.ms-opt { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.ms-opt:hover { background: hsla(225 40% 70% / .08); }
+.cell-select { padding: 6px 10px; font-size: 13px; width: auto; min-width: 140px; }
+.badge.new { color: hsl(196 95% 70%); background: hsla(196 95% 58% / .12); }
+.badge.resub { color: hsl(280 90% 78%); background: hsla(280 90% 70% / .14); }
+.table-wrap td { overflow: visible; }
+.table-wrap { overflow: auto; }
+.sys-badge { font-family: 'Outfit'; font-weight: 700; font-size: 22px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.gloss { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.gloss .card b { font-family: 'Outfit'; font-size: 26px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.chip-group { margin-bottom: 8px; }
+.chip-group small { display: block; color: var(--muted); margin: 6px 0; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
