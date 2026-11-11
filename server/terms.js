@@ -8,6 +8,38 @@ export const RISK_RATINGS = ['High', 'Medium High'];
 export const ROOT_CAUSES = ['Entity', 'Industry', 'Initiation', 'Jurisdiction', 'Nominee Shareholder', 'PEP', 'Suspicious Activities', 'DNFBP', 'Adverse News'];
 export const TITLES = ['Assistant Director', 'Assistant Manager', 'Senior AML Officer', 'AML Officer'];
 
+/* ---------- Screening cases ----------
+ * Admin creates a case (uncategorised) -> officer reviews -> case is categorised
+ * into one of the MODULES (True Match / HM / RF / SAR). */
+export const MODULES = [
+  { slug: 'true-match', name: 'True Match' },
+  { slug: 'heightened-monitoring', name: 'Heightened Monitoring', short: 'HM' },
+  { slug: 'red-flag', name: 'Red Flag', short: 'RF' },
+  { slug: 'sar', name: 'Suspicious Activity Report', short: 'SAR' },
+];
+export const MODULE_SLUGS = MODULES.map((m) => m.slug);
+export const HM_SLUG = 'heightened-monitoring';
+// Inspection team mailbox used by "Notify inspection team" (blank = choose recipient in the mail app).
+export const INSPECTION_TEAM_EMAIL = process.env.INSPECTION_TEAM_EMAIL || '';
+export const ESCALATE = 'Escalate to Manager';
+export const POSSIBLE = 'Possible';
+export const CASE_STATUSES = ['Under Review', 'False', POSSIBLE, ESCALATE, 'Requested Further Documents', 'True Match'];
+export const ALERT_RESULTS = ['True Match', 'False Match', POSSIBLE, ESCALATE];
+// Alert Result is not chosen: it follows the Status. Statuses not listed (Under Review,
+// Requested Further Documents) have no result yet, so the Alert Result stays locked.
+export const RESULT_FOR_STATUS = { 'True Match': 'True Match', False: 'False Match', [POSSIBLE]: POSSIBLE, [ESCALATE]: ESCALATE };
+// "Possible" and "Escalate to Manager" wait for a decision (the application is on hold).
+// Possible may be escalated to a manager; an escalation comes back only as True Match or False.
+export const PENDING_STATUSES = [POSSIBLE, ESCALATE];
+export const DECISION_STATUSES = ['True Match', 'False'];
+// Escalation to manager: officer's recommendation when escalating, manager's (mandatory) when deciding.
+export const OTHERS = 'Others';
+export const INVESTIGATOR_RECS = ['Heightened Monitoring', 'SAR', 'PCC', 'Court Clearance Certificate', OTHERS];
+export const AGREED = 'Agreed to officer recommendation';
+export const MANAGER_RECS = [AGREED, 'Heightened Monitoring', 'PCC', 'Court Clearance Certificate', 'SAR', OTHERS];
+export const NEXT_STATUSES ={ [POSSIBLE]: [...DECISION_STATUSES, ESCALATE], [ESCALATE]: DECISION_STATUSES };
+export const ALERT_CATEGORIES = ['PEP', 'Sanctions', 'Law Enforcement', 'Regulatory Enforcement', 'Adverse Media', 'State Owned Enterprise', 'Other'];
+
 export const GLOSSARY = [
   ['HM', 'Heightened Monitoring'],
   ['RF', 'Red Flag'],

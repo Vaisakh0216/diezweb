@@ -1,7 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import './index.css';
+import { applyTheme } from './theme.jsx';
+
+applyTheme();
 import { AuthProvider, ToastProvider, useAuth } from './context.jsx';
 import Layout from './components/Layout.jsx';
 import Login from './pages/Login.jsx';
@@ -10,7 +13,7 @@ import EddOverview from './pages/EddOverview.jsx';
 import MyCases from './pages/MyCases.jsx';
 import BulkUpload from './pages/BulkUpload.jsx';
 import MasterData from './pages/MasterData.jsx';
-import ComingSoon from './pages/ComingSoon.jsx';
+import Cases from './pages/Cases.jsx';
 import Glossary from './pages/Glossary.jsx';
 
 function Protected({ children, admin }) {
@@ -21,6 +24,18 @@ function Protected({ children, admin }) {
   return children;
 }
 
+/** My Work is for officers; admins work from Master Data */
+function OfficerOnly({ children }) {
+  const { user } = useAuth();
+  return user.role === 'admin' ? <Navigate to="/edd/master" replace /> : children;
+}
+
+/** Old /module/:slug links (bookmarks) now live under /cases/:slug */
+function LegacyModuleRedirect() {
+  const { slug } = useParams();
+  return <Navigate to={`/cases/${slug}`} replace />;
+}
+
 function App() {
   return (
     <Routes>
@@ -28,11 +43,13 @@ function App() {
       <Route element={<Protected><Layout /></Protected>}>
         <Route index element={<Navigate to="/edd" replace />} />
         <Route path="/edd" element={<EddOverview />} />
-        <Route path="/edd/cases" element={<MyCases />} />
+        <Route path="/edd/cases" element={<OfficerOnly><MyCases /></OfficerOnly>} />
         <Route path="/edd/upload" element={<BulkUpload />} />
         <Route path="/edd/master" element={<MasterData />} />
         <Route path="/users" element={<Protected admin><Users /></Protected>} />
-        <Route path="/module/:slug" element={<ComingSoon />} />
+        <Route path="/cases" element={<Cases />} />
+        <Route path="/cases/:view" element={<Cases />} />
+        <Route path="/module/:slug" element={<LegacyModuleRedirect />} />
         <Route path="/glossary" element={<Glossary />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

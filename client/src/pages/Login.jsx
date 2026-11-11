@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context.jsx';
+import { ORG } from '../org.js';
+import { ThemeToggle } from '../theme.jsx';
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -23,7 +25,7 @@ export default function Login() {
     <div className="login-wrap">
       <section className="login-hero">
         <div className="orb" />
-        <div className="brand"><div className="brand-logo">S</div><h2>Sentinel</h2></div>
+        <div className="brand"><div className="brand-logo">{ORG.initial}</div><div><h2>{ORG.company}</h2><small>{ORG.department}</small></div></div>
         <h1>Compliance that<br /><span>never sleeps.</span></h1>
         <p className="muted" style={{ maxWidth: 460, fontSize: 16 }}>
           A single place for enhanced due diligence, screening, monitoring and suspicious activity reporting.
@@ -34,6 +36,7 @@ export default function Login() {
           <div style={{ gridColumn: '1/-1' }}>🕵️ Suspicious Activity Report</div>
         </div>
       </section>
+      <ThemeToggle className="login-theme" />
       <section className="login-panel">
         <form className="card login-card" onSubmit={submit}>
           <h1 style={{ fontSize: 26 }}>Welcome back</h1>

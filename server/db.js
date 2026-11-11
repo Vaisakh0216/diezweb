@@ -64,7 +64,107 @@ CREATE TABLE IF NOT EXISTS case_events (
   by_user INTEGER,
   at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Officer/admin findings & discussion per case. Append-only (audit trail).
+CREATE TABLE IF NOT EXISTS case_remarks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES edd_cases(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_case_remarks_case ON case_remarks(case_id, id);
+
+-- Screening cases. Admin creates (company + service request + assignee), uncategorised.
+-- The officer completes the review; the case is then categorised into a module
+-- (true-match | heightened-monitoring | red-flag | sar).
+CREATE TABLE IF NOT EXISTS screening_cases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_no TEXT NOT NULL UNIQUE,
+  company TEXT NOT NULL,
+  module TEXT,                         -- NULL = not yet categorised
+  assigned_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  app_type TEXT,
+  wc_reference TEXT,
+  matched_party TEXT,
+  alert_category TEXT,
+  status TEXT NOT NULL DEFAULT 'Under Review',
+  alert_result TEXT,
+  false_reason TEXT,                   -- required when status = False
+  escalated_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  escalated_at TEXT,
+  categorised_at TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assigned_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_screening_cases_assignee ON screening_cases(assigned_to, status);
+CREATE INDEX IF NOT EXISTS idx_screening_cases_module ON screening_cases(module, status);
+CREATE TABLE IF NOT EXISTS screening_case_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES screening_cases(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,                  -- created | assigned | updated | status | escalated | categorised
+  detail TEXT,
+  from_user INTEGER, to_user INTEGER,
+  by_user INTEGER,
+  at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS screening_case_remarks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES screening_cases(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_screening_case_remarks_case ON screening_case_remarks(case_id, id);
+-- Extra details captured when a case is categorised as Heightened Monitoring.
+-- company / alert_category / investigator are stored as they were at that moment.
+CREATE TABLE IF NOT EXISTS screening_case_hm (
+  case_id INTEGER PRIMARY KEY REFERENCES screening_cases(id) ON DELETE CASCADE,
+  hm_date TEXT NOT NULL DEFAULT (datetime('now')),
+  bu TEXT NOT NULL,
+  company TEXT NOT NULL,
+  alert_category TEXT,
+  crime_details TEXT NOT NULL,
+  investigator_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  investigator_name TEXT,
+  notify_template TEXT NOT NULL,
+  recorded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+-- Audit trail for deleted cases: full snapshot (case + remarks + activity) and who/why.
+CREATE TABLE IF NOT EXISTS screening_case_deletions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL,
+  request_no TEXT NOT NULL,
+  company TEXT,
+  snapshot TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  deleted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
+
+// One-time migration from the first version (module_cases: module required, old status list).
+if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='module_cases'").get()) {
+  db.transaction(() => {
+    db.exec(`
+      INSERT OR IGNORE INTO screening_cases (id,request_no,company,module,assigned_to,app_type,wc_reference,matched_party,alert_category,
+        status,alert_result,created_by,assigned_at,created_at,updated_at)
+      SELECT id,request_no,company,module,assigned_to,app_type,wc_reference,matched_party,alert_category,
+        CASE status WHEN 'Escalated' THEN 'Escalate to Manager' ELSE 'Under Review' END,
+        CASE alert_result WHEN 'False Positive' THEN 'False Match' WHEN 'Inconclusive' THEN 'Possible' ELSE alert_result END,
+        created_by,assigned_at,created_at,updated_at
+      FROM module_cases;
+      INSERT OR IGNORE INTO screening_case_events (id,case_id,type,detail,from_user,to_user,by_user,at)
+        SELECT id,case_id,type,detail,from_user,to_user,by_user,at FROM module_case_events WHERE case_id IN (SELECT id FROM screening_cases);
+      INSERT OR IGNORE INTO screening_case_remarks (id,case_id,user_id,body,created_at)
+        SELECT id,case_id,user_id,body,created_at FROM module_case_remarks WHERE case_id IN (SELECT id FROM screening_cases);
+      DROP TABLE module_case_remarks; DROP TABLE module_case_events; DROP TABLE module_cases;
+    `);
+  })();
+  console.log('Migrated module_cases -> screening_cases');
+}
 
 if (!db.prepare('SELECT 1 FROM users LIMIT 1').get()) {
   const ins = db.prepare('INSERT INTO users (name,email,password_hash,role,title,duties,bus,aliases) VALUES (?,?,?,?,?,?,?,?)');
@@ -72,6 +172,68 @@ if (!db.prepare('SELECT 1 FROM users LIMIT 1').get()) {
   ins.run('Administrator', 'admin@edd.local', bcrypt.hashSync('admin123', 10), 'admin', 'Assistant Director', JSON.stringify(APP_TYPES), JSON.stringify(BUS), '');
   for (const t of TEAM) ins.run(t.name, t.email, tmp, t.role, t.title, JSON.stringify(t.duties), JSON.stringify(t.bus), t.aliases);
   console.log('Seeded admin@edd.local / admin123 and team (<firstname>@edd.local / Welcome@123)');
+}
+
+// One row per escalation to a manager, shown inside the case.
+// Officer: escalates + investigator recommendation. Manager: findings + manager recommendation (required).
+// Officer then records True Match / False (decision, decided_*).
+const ESCALATIONS_SQL = `CREATE TABLE screening_case_escalations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES screening_cases(id) ON DELETE CASCADE,
+  escalated_at TEXT NOT NULL,
+  escalated_to INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  escalated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  bu TEXT,
+  company TEXT NOT NULL,
+  alert_category TEXT,
+  investigator_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  investigator_name TEXT,
+  investigator_rec TEXT NOT NULL,
+  investigator_rec_other TEXT,
+  findings TEXT,
+  manager_rec TEXT,
+  manager_rec_other TEXT,
+  manager_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  manager_at TEXT,
+  decision TEXT,
+  decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  decided_at TEXT
+)`;
+const escCols = db.prepare('PRAGMA table_info(screening_case_escalations)').all();
+if (!escCols.length) db.exec(ESCALATIONS_SQL);
+else if (!escCols.some((c) => c.name === 'manager_at')) {
+  // first version required BU/findings from the officer: rebuild, keeping any rows
+  db.transaction(() => {
+    db.exec('ALTER TABLE screening_case_escalations RENAME TO screening_case_escalations_v1');
+    db.exec(ESCALATIONS_SQL);
+    db.exec(`INSERT INTO screening_case_escalations (id,case_id,escalated_at,escalated_to,escalated_by,bu,company,alert_category,investigator_id,
+      investigator_name,investigator_rec,investigator_rec_other,findings,manager_rec,manager_rec_other,manager_by,manager_at,decision,decided_by,decided_at)
+      SELECT id,case_id,escalated_at,escalated_to,escalated_by,bu,company,alert_category,investigator_id,investigator_name,investigator_rec,
+      investigator_rec_other,findings,manager_rec,manager_rec_other,decided_by,decided_at,decision,decided_by,decided_at FROM screening_case_escalations_v1`);
+    db.exec('DROP TABLE screening_case_escalations_v1');
+  })();
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_escalations_case ON screening_case_escalations(case_id, id)');
+
+// BU of a screening case: entered by the officer in the review (backfilled from HM/escalation or the request prefix).
+if (!db.prepare('PRAGMA table_info(screening_cases)').all().some((c) => c.name === 'bu')) {
+  db.transaction(() => {
+    db.exec('ALTER TABLE screening_cases ADD COLUMN bu TEXT');
+    db.exec(`UPDATE screening_cases SET bu = COALESCE(
+      (SELECT bu FROM screening_case_hm h WHERE h.case_id=screening_cases.id),
+      (SELECT bu FROM screening_case_escalations e WHERE e.case_id=screening_cases.id AND e.bu IS NOT NULL ORDER BY e.id DESC LIMIT 1))`);
+    const set = db.prepare('UPDATE screening_cases SET bu=? WHERE id=?');
+    for (const r of db.prepare('SELECT id, request_no FROM screening_cases WHERE bu IS NULL').all()) {
+      const b = BUS.find((x) => String(r.request_no).toUpperCase().startsWith(`${x}-`));
+      if (b) set.run(b, r.id);
+    }
+  })();
+}
+
+// Escalation managers: admins who receive "Escalate to Manager" cases (initially Yaser and Raneem).
+if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'escalation_manager')) {
+  db.exec('ALTER TABLE users ADD COLUMN escalation_manager INTEGER NOT NULL DEFAULT 0');
+  db.prepare("UPDATE users SET escalation_manager=1 WHERE role='admin' AND email IN ('yaser@edd.local','raneem@edd.local')").run();
 }
 
 export default db;

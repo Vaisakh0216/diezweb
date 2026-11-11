@@ -134,7 +134,9 @@ export default function BulkUpload() {
           {!Object.keys(result.perUser).length && <span className="muted">—</span>}
           <div className="row" style={{ marginTop: 20 }}>
             <button className="btn" onClick={reset} id="btn-upload-another">Upload another</button>
-            <Link className="btn btn-primary" to="/edd/cases">Go to My Work →</Link>
+            {user?.role === 'admin'
+              ? <Link className="btn btn-primary" to="/edd/master">Go to Master Data →</Link>
+              : <Link className="btn btn-primary" to="/edd/cases">Go to My Work →</Link>}
           </div>
         </div>
       )}

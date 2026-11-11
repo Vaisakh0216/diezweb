@@ -75,9 +75,10 @@ export default function Users() {
                 <tr key={u.id}>
                   <td><div className="row"><div className="avatar">{initials(u.name)}</div><div><div style={{ fontWeight: 600 }}>{u.name}</div><div className="muted" style={{ fontSize: 12 }}>{u.email}</div></div></div></td>
                   <td>{u.title || '—'}</td>
-                  <td><span className={`badge ${u.role === 'admin' ? 'admin' : ''}`}>{u.role}</span></td>
+                  <td><span className={`badge ${u.role === 'admin' ? 'admin' : ''}`}>{u.role}</span>
+                    {u.escalation_manager && <div style={{ marginTop: 4 }}><span className="tag" title="Receives Escalate to Manager cases">↑ Escalations</span></div>}</td>
                   <td>{u.bus.map((b) => <span key={b} className="tag">{b}</span>)}</td>
-                  <td style={{ whiteSpace: 'normal', maxWidth: 300 }}>
+                  <td className="col-tags">
                     {u.duties.length === allTypes.length ? <span className="tag">All types</span>
                       : u.duties.length > 3 ? <><span className="tag">{u.duties.length} types</span></>
                       : u.duties.map((d) => <span key={d} className="tag">{d}</span>)}
@@ -112,7 +113,13 @@ export default function Users() {
             <div className="field"><label>Role</label>
               <select id="user-role" className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                 <option value="user">User (Officer)</option><option value="admin">Admin (Manager)</option>
-              </select></div>
+              </select>
+              {form.role === 'admin' && (
+                <label className="row" style={{ gap: 8, marginTop: 6, color: 'var(--text)', fontSize: 13 }}>
+                  <input id="user-esc-mgr" type="checkbox" checked={!!form.escalation_manager} onChange={(e) => setForm({ ...form, escalation_manager: e.target.checked })} />
+                  Escalation manager: officers can escalate cases to this person
+                </label>
+              )}</div>
             <div className="field"><label>{form.id ? 'New password (optional)' : 'Password'}</label><input id="user-password" className="input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
             <div className="field"><label>Availability</label>
               <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>

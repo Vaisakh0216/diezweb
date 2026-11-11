@@ -1,36 +1,110 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api, qs, fmtDate, exportCSV } from '../api.js';
 import { useAuth, useMeta, useToast } from '../context.jsx';
 import { Modal, StatusBadge, RiskBadge, MultiSelect } from './ui.jsx';
 
-/** Case detail + history modal (shared) */
-export function CaseDetail({ c, onClose }) {
+/** SQLite UTC "YYYY-MM-DD HH:MM:SS" -> local, readable */
+export const fmtStamp = (s) => {
+  const d = new Date(String(s).replace(' ', 'T') + 'Z');
+  return isNaN(d) ? s : d.toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+/** Findings / discussion thread between officers and admins on one case.
+ *  base: API path of the case, e.g. `/edd/cases/12` or `/modules/cases/3` */
+export function Remarks({ base, onCount }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [items, setItems] = useState(null);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const endRef = useRef();
+
+  useEffect(() => { api(`${base}/remarks`).then(setItems).catch((e) => { setItems([]); toast(e.message, 'error'); }); }, [base]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [items?.length]);
+
+  const send = async () => {
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    try {
+      const list = await api(`${base}/remarks`, { method: 'POST', body: { body: text } });
+      setItems(list); setText(''); onCount?.(list.length);
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="remarks">
+      <div className="remarks-list">
+        {items === null && <div className="muted">Loading…</div>}
+        {items?.length === 0 && <div className="muted remarks-empty">No remarks yet. Record findings, questions or decisions for this case.</div>}
+        {items?.map((r) => (
+          <div key={r.id} className={`remark ${r.user_id === user.id ? 'mine' : ''}`}>
+            <div className="remark-head">
+              <b>{r.user_name || 'Deleted user'}</b>
+              {r.user_role === 'admin' ? <span className="badge admin">Admin</span> : r.user_title && <span className="muted">{r.user_title}</span>}
+              <span className="muted remark-time">{fmtStamp(r.created_at)}</span>
+            </div>
+            <div className="remark-body">{r.body}</div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <div className="remark-compose">
+        <textarea id="remark-input" className="input" rows={3} maxLength={4000} placeholder="Add a remark… (⌘/Ctrl + Enter to send)"
+          value={text} onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }} />
+        <div className="row">
+          <span className="muted" style={{ fontSize: 12 }}>Remarks are permanent and visible to everyone with access to this case.</span>
+          <button id="btn-remark" className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} disabled={!text.trim() || busy} onClick={send}>
+            {busy ? 'Posting…' : 'Post remark'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Small count marker shown next to a request # */
+export function RemarkCount({ n }) {
+  return n ? <span className="remark-count" title={`${n} remark(s)`}>💬 {n}</span> : null;
+}
+
+/** Case detail + remarks + history modal (shared) */
+export function CaseDetail({ c, onClose, onRemarks }) {
   const [history, setHistory] = useState([]);
   useEffect(() => { api(`/edd/cases/${c.id}/history`).then(setHistory).catch(() => {}); }, [c.id]);
   return (
-    <Modal wide title={`${c.request_no} · ${c.company}`} onClose={onClose} footer={<button className="btn" onClick={onClose}>Close</button>}>
-      <div className="row" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
-        <span className="tag">{c.bu}</span><span className="tag">{c.app_type}</span><StatusBadge status={c.edd_status} />
-        {c.resubmission_count > 0 && <span className="badge resub">Resubmitted ×{c.resubmission_count}</span>}
-        {c.is_history ? <span className="badge">History import</span> : null}
-      </div>
-      <div className="form-grid" style={{ marginBottom: 16 }}>
-        <div><div className="muted">Assigned to</div><b>{c.assigned_name || 'Unassigned'}</b></div>
-        <div><div className="muted">Salesforce owner</div><b>{c.owner_name || '—'}</b></div>
-        <div><div className="muted">Risk rating</div><RiskBadge risk={c.risk_rating} /></div>
-        <div><div className="muted">Root cause</div>{c.root_causes.length ? c.root_causes.map((r) => <span key={r} className="tag">{r}</span>) : '—'}</div>
-      </div>
-      <div className="table-wrap" style={{ maxHeight: 260 }}>
-        <table><tbody>{Object.entries(c.data).map(([k, v]) => <tr key={k}><td className="muted" style={{ width: '40%' }}>{k}</td><td style={{ whiteSpace: 'normal' }}>{String(v)}</td></tr>)}</tbody></table>
-      </div>
-      <h3 style={{ fontSize: 15, margin: '20px 0 10px' }}>Activity</h3>
-      {history.map((h) => (
-        <div key={h.id} className="muted" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-          <b style={{ color: 'var(--text)', textTransform: 'capitalize' }}>{h.type}</b>
-          {h.type === 'transfer' && <> · {h.from_name || 'Unassigned'} → {h.to_name}</>}
-          {h.detail && <> · {h.detail}</>} · by {h.by_name || 'system'} · {h.at}
+    <Modal size="xl" title={`${c.request_no} · ${c.company}`} onClose={onClose} footer={<button className="btn" onClick={onClose}>Close</button>}>
+      <div className="detail-split">
+        <div className="detail-main">
+          <div className="row" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
+            <span className="tag">{c.bu}</span><span className="tag">{c.app_type}</span><StatusBadge status={c.edd_status} />
+            {c.resubmission_count > 0 && <span className="badge resub">Resubmitted ×{c.resubmission_count}</span>}
+            {c.is_history ? <span className="badge">History import</span> : null}
+          </div>
+          <div className="form-grid" style={{ marginBottom: 16 }}>
+            <div><div className="muted">Assigned to</div><b>{c.assigned_name || 'Unassigned'}</b></div>
+            <div><div className="muted">Salesforce owner</div><b>{c.owner_name || '—'}</b></div>
+            <div><div className="muted">Risk rating</div><RiskBadge risk={c.risk_rating} /></div>
+            <div><div className="muted">Root cause</div>{c.root_causes.length ? c.root_causes.map((r) => <span key={r} className="tag">{r}</span>) : '—'}</div>
+          </div>
+          <div className="table-wrap kv-table">
+            <table><tbody>{Object.entries(c.data).map(([k, v]) => <tr key={k}><td className="muted">{k}</td><td>{String(v)}</td></tr>)}</tbody></table>
+          </div>
+          <h3 className="detail-h">Activity</h3>
+          {history.map((h) => (
+            <div key={h.id} className="activity-row">
+              <b>{h.type}</b>
+              {h.type === 'transfer' && <> · {h.from_name || 'Unassigned'} → {h.to_name}</>}
+              {h.detail && <> · {h.detail}</>} · by {h.by_name || 'system'} · {fmtStamp(h.at)}
+            </div>
+          ))}
         </div>
-      ))}
+        <aside className="detail-side">
+          <h3 className="detail-h" style={{ marginTop: 0 }}>Remarks &amp; findings</h3>
+          <Remarks base={`/edd/cases/${c.id}`} onCount={(n) => onRemarks?.(c.id, n)} />
+        </aside>
+      </div>
     </Modal>
   );
 }
@@ -119,7 +193,7 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
         <table>
           <thead>
             <tr>
-              <th style={{ width: 36 }}><input type="checkbox" checked={allChecked} onChange={() => setSelected(allChecked ? [] : cases.map((c) => c.id))} /></th>
+              <th className="col-check"><input type="checkbox" checked={allChecked} onChange={() => setSelected(allChecked ? [] : cases.map((c) => c.id))} /></th>
               <th>Service Request#</th>
               <th>Company Name</th>
               {showRiskCols && <><th>Risk Rating</th><th>Root Cause</th></>}
@@ -136,14 +210,15 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
               <tr key={c.id} className={selected.includes(c.id) ? 'selected' : ''}>
                 <td><input type="checkbox" checked={selected.includes(c.id)} onChange={() => setSelected((s) => (s.includes(c.id) ? s.filter((x) => x !== c.id) : [...s, c.id]))} /></td>
                 <td>
-                  <a href="#" onClick={(e) => { e.preventDefault(); setDetail(c); }} style={{ color: 'var(--primary-2)', fontWeight: 600 }}>{c.request_no}</a>
-                  <div style={{ marginTop: 4 }}>
+                  <a href="#" onClick={(e) => { e.preventDefault(); setDetail(c); }} className="cell-link">{c.request_no}</a>
+                  <div className="row" style={{ marginTop: 4, gap: 6 }}>
+                    <RemarkCount n={c.remark_count} />
                     {c.resubmission_count > 0
                       ? <span className="badge resub" title={`Resubmitted ${c.resubmitted_at}`}>Resubmitted</span>
                       : tab === 'work' && <span className="badge new">New</span>}
                   </div>
                 </td>
-                <td style={{ maxWidth: 260, whiteSpace: 'normal' }}>{c.company}</td>
+                <td className="col-company">{c.company}</td>
                 {showRiskCols && (
                   c.is_new && editable ? (<>
                     <td>
@@ -154,7 +229,7 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
                     <td><MultiSelect options={meta.rootCauses} value={c.root_causes} onChange={(v) => patch(c, { root_causes: v })} /></td>
                   </>) : (<>
                     <td><RiskBadge risk={c.risk_rating} /></td>
-                    <td style={{ whiteSpace: 'normal', maxWidth: 240 }}>{c.root_causes.length ? c.root_causes.map((r) => <span key={r} className="tag">{r}</span>) : <span className="muted">—</span>}</td>
+                    <td className="col-tags">{c.root_causes.length ? c.root_causes.map((r) => <span key={r} className="tag">{r}</span>) : <span className="muted">—</span>}</td>
                   </>)
                 )}
                 {showBu && <td><span className="tag">{c.bu}</span></td>}
@@ -200,7 +275,8 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
           </div>
         </Modal>
       )}
-      {detail && <CaseDetail c={detail} onClose={() => setDetail(null)} />}
+      {detail && <CaseDetail c={detail} onClose={() => setDetail(null)}
+        onRemarks={(id, n) => setCases((cs) => cs.map((x) => (x.id === id ? { ...x, remark_count: n } : x)))} />}
     </div>
   );
 }
