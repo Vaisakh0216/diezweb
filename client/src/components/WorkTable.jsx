@@ -11,7 +11,8 @@ export const fmtStamp = (s) => {
 
 /** Findings / discussion thread between officers and admins on one case.
  *  base: API path of the case, e.g. `/edd/cases/12` or `/modules/cases/3` */
-export function Remarks({ base, onCount }) {
+/** readOnly: list only, no compose box (view-only Master Data) */
+export function Remarks({ base, onCount, readOnly }) {
   const { user } = useAuth();
   const toast = useToast();
   const [items, setItems] = useState(null);
@@ -49,7 +50,7 @@ export function Remarks({ base, onCount }) {
         ))}
         <div ref={endRef} />
       </div>
-      <div className="remark-compose">
+      {!readOnly && <div className="remark-compose">
         <textarea id="remark-input" className="input" rows={3} maxLength={4000} placeholder="Add a remark… (⌘/Ctrl + Enter to send)"
           value={text} onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); } }} />
@@ -59,7 +60,7 @@ export function Remarks({ base, onCount }) {
             {busy ? 'Posting…' : 'Post remark'}
           </button>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

@@ -409,3 +409,18 @@ textarea.mono { font-size: 13px; line-height: 1.5; resize: vertical; }
 .num-ok { color: var(--success); }
 
 .select-bar { padding: 10px 14px; margin-bottom: 12px; background: hsla(252 90% 67% / .1); }
+
+/* ---------- coming soon ---------- */
+.nav-soon { margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: hsla(var(--tint) / .12); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.soon { display: grid; justify-items: center; text-align: center; gap: 10px; padding: 64px 24px; }
+.soon h3 { font-size: 20px; }
+.soon p { max-width: 520px; margin: 0; line-height: 1.55; }
+.soon-badge { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 4px 12px; border-radius: 20px; background: var(--grad); color: #fff; }
+
+/* True Match checkbox in the review form */
+.tm-check { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border-strong); cursor: pointer; font-size: 14px; color: var(--text); }
+.tm-check:has(input:checked) { border-color: var(--danger); background: hsla(350 85% 63% / .08); }
+
+/* review form locked for the manager (fieldset disabled), manager's own section below */
+.fieldset-plain { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mgr-section { margin-top: 16px; padding: 14px; border-radius: 12px; border: 1px solid var(--primary); background: hsla(252 90% 67% / .06); }

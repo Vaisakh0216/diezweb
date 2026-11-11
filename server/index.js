@@ -146,8 +146,8 @@ app.get('/api/auth/me', auth, (req, res) => res.json(req.user));
 app.get('/api/meta', (req, res) => res.json({
   bus: T.BUS, dsoGroup: T.DSO_GROUP, eddStatuses: T.EDD_STATUSES, riskRatings: T.RISK_RATINGS, rootCauses: T.ROOT_CAUSES,
   titles: T.TITLES, appTypes: T.APP_TYPES, dsoTerms: T.DSO_TERMS, dafzDccTerms: T.DAFZ_DCC_TERMS, glossary: T.GLOSSARY,
-  modules: T.MODULES, caseStatuses: T.CASE_STATUSES, alertCategories: T.ALERT_CATEGORIES, alertResults: T.ALERT_RESULTS,
-  resultForStatus: T.RESULT_FOR_STATUS, pendingStatuses: T.PENDING_STATUSES, decisionStatuses: T.DECISION_STATUSES, nextStatuses: T.NEXT_STATUSES,
+  modules: T.MODULES, caseStatuses: T.CASE_STATUSES, alertCategories: T.ALERT_CATEGORIES,
+  nfaSlug: T.NFA_SLUG, trueMatch: T.TRUE_MATCH, pendingStatuses: T.PENDING_STATUSES, decisionStatuses: T.DECISION_STATUSES, nextStatuses: T.NEXT_STATUSES,
   escalate: T.ESCALATE, possible: T.POSSIBLE, hmSlug: T.HM_SLUG, inspectionEmail: T.INSPECTION_TEAM_EMAIL,
   investigatorRecs: T.INVESTIGATOR_RECS, managerRecs: T.MANAGER_RECS, others: T.OTHERS, agreed: T.AGREED,
 }));
@@ -367,6 +367,7 @@ app.get('/api/edd/team', auth, adminOnly, (req, res) => {
     SUM(edd_status IS NULL AND resubmission_count>0) resubmitted,
     SUM(edd_status IS NULL AND app_type='License Renewal') open_lr,
     SUM(edd_status IN ('Requested','Returned for reupload')) awaiting,
+    SUM(edd_status='Requested') requested, SUM(edd_status='Returned for reupload') returned,
     SUM(edd_status='Approved') approved,
     SUM(edd_status IS NOT 'Approved' AND risk_rating='High') high_risk,
     MIN(CASE WHEN edd_status IS NULL THEN created_date END) oldest_open,
@@ -377,21 +378,25 @@ app.get('/api/edd/team', auth, adminOnly, (req, res) => {
     WHERE e.type='status' AND e.detail LIKE '%→ Approved' AND e.at >= datetime('now','-30 days') GROUP BY c.assigned_to`).all();
   const scr = db.prepare(`SELECT assigned_to uid, SUM(status!='False') cases_active,
     SUM(status IN (?, ?)) cases_pending FROM screening_cases WHERE assigned_to IS NOT NULL GROUP BY assigned_to`).all(T.POSSIBLE, T.ESCALATE);
+  // escalated cases waiting for this manager's recommendation
+  const escw = db.prepare(`SELECT c.escalated_to uid, COUNT(*) n FROM screening_cases c WHERE c.status=? AND c.escalated_to IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM screening_case_escalations e WHERE e.case_id=c.id AND e.decided_at IS NULL AND e.manager_at IS NOT NULL)
+    GROUP BY c.escalated_to`).all(T.ESCALATE);
   const last = db.prepare(`SELECT by_user uid, MAX(at) at FROM (
     SELECT by_user, at FROM case_events UNION ALL SELECT by_user, at FROM screening_case_events) WHERE by_user IS NOT NULL GROUP BY by_user`).all();
   const by = (rows) => Object.fromEntries(rows.map((r) => [r.uid, r]));
-  const E = by(edd), S = by(scr), L = by(last), R = by(recent);
-  const zero = { open: 0, new_apps: 0, resubmitted: 0, open_lr: 0, awaiting: 0, approved: 0, high_risk: 0, oldest_open: null, total: 0 };
+  const E = by(edd), S = by(scr), L = by(last), R = by(recent), W = by(escw);
+  const zero = { open: 0, new_apps: 0, resubmitted: 0, open_lr: 0, awaiting: 0, requested: 0, returned: 0, approved: 0, high_risk: 0, oldest_open: null, total: 0 };
   const users = db.prepare('SELECT * FROM users ORDER BY role DESC, name').all().map(publicUser)
-    // officers always; admins only when they hold cases
-    .filter((u) => u.role === 'user' || E[u.id] || S[u.id]);
+    // officers and assistant managers always; other admins only when they hold cases
+    .filter((u) => u.role === 'user' || /assistant manager/i.test(u.title || '') || E[u.id] || S[u.id]);
   res.json(users.map((u) => {
     const { uid, ...e } = E[u.id] || zero;
     return {
       id: u.id, name: u.name, title: u.title, role: u.role, status: u.status, bus: u.bus, duties: u.duties,
       ...Object.fromEntries(Object.entries({ ...zero, ...e }).map(([k, v]) => [k, k === 'oldest_open' ? v : v || 0])),
       approved_30d: R[u.id]?.n || 0, cases_active: S[u.id]?.cases_active || 0, cases_pending: S[u.id]?.cases_pending || 0,
-      last_activity: L[u.id]?.at || null,
+      escalations_waiting: W[u.id]?.n || 0, last_activity: L[u.id]?.at || null,
     };
   }));
 });

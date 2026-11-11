@@ -15,6 +15,8 @@ import BulkUpload from './pages/BulkUpload.jsx';
 import MasterData from './pages/MasterData.jsx';
 import Cases from './pages/Cases.jsx';
 import Glossary from './pages/Glossary.jsx';
+import Reports from './pages/Reports.jsx';
+import ComingSoon from './pages/ComingSoon.jsx';
 
 function Protected({ children, admin }) {
   const { user, loading } = useAuth();
@@ -51,6 +53,9 @@ function App() {
         <Route path="/cases/:view" element={<Cases />} />
         <Route path="/module/:slug" element={<LegacyModuleRedirect />} />
         <Route path="/glossary" element={<Glossary />} />
+        <Route path="/dashboard" element={<ComingSoon crumb="Dashboard" title="Dashboard">A single view of EDD and case activity across the team.</ComingSoon>} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports/:report" element={<Reports />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

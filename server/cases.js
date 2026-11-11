@@ -7,14 +7,14 @@ import * as XLSX from 'xlsx';
 import db from './db.js';
 import * as T from './terms.js';
 
-// Entered by the officer (all mandatory). alert_result is derived from status, never entered.
+// Entered by the officer (all mandatory).
 const REVIEW_FIELDS = ['app_type', 'bu', 'wc_reference', 'matched_party', 'alert_category', 'status'];
 const LABELS = {
   app_type: 'Application Type', bu: 'BU', wc_reference: 'World-Check Reference', matched_party: 'Matched Individual/Company',
-  alert_category: 'Alert Category', status: 'Status', alert_result: 'Alert Result', module: 'Category',
+  alert_category: 'Alert Category', status: 'Status', module: 'Category',
 };
 const CHOICES = { app_type: T.APP_TYPES, bu: T.BUS, alert_category: T.ALERT_CATEGORIES, status: T.CASE_STATUSES };
-const MODULE_NAME = Object.fromEntries(T.MODULES.map((m) => [m.slug, m.name]));
+const MODULE_NAME = { ...Object.fromEntries(T.MODULES.map((m) => [m.slug, m.name])), [T.NFA_SLUG]: 'No further action' };
 const TEXT_MAX = 300;
 const REASON_MAX = 1000;
 const REMARK_MAX = 4000;
@@ -23,7 +23,7 @@ const SELECT = `SELECT c.*, u.name assigned_name, cb.name created_by_name, eu.na
   (SELECT COUNT(*) FROM screening_case_remarks r WHERE r.case_id=c.id) remark_count,
   hm.hm_date, hm.bu hm_bu, hm.alert_category hm_alert_category, hm.crime_details hm_details,
   hm.investigator_name hm_investigator, hm.notify_template hm_template,
-  e.id esc_id, e.bu esc_bu, e.findings esc_findings, e.investigator_name esc_investigator, e.alert_category esc_alert_category,
+  e.id esc_id, e.bu esc_bu, e.findings esc_findings, e.notify_template esc_template, e.investigator_name esc_investigator, e.alert_category esc_alert_category,
   e.investigator_rec esc_investigator_rec, e.investigator_rec_other esc_investigator_rec_other,
   e.manager_rec esc_manager_rec, e.manager_rec_other esc_manager_rec_other, e.manager_at esc_manager_at, mu.name esc_manager_by_name,
   e.decision esc_decision, e.decided_at esc_decided_at, du.name esc_decided_by_name
@@ -36,30 +36,26 @@ const TEMPLATE_MAX = 5000;
 const recText = (rec, other) => (rec === T.OTHERS && other ? `Others: ${other}` : rec);
 const nowSql = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-/* Escalate to Manager: the officer writes the report (crime/alert details) and their recommendation; the rest is auto-populated. */
+/* Escalate to Manager: the officer writes the report (crime/alert details + inspection team notification) and their recommendation; the rest is auto-populated. */
 function validateEscalation(b) {
   const findings = String(b?.findings ?? '').trim();
   if (!findings) return { error: 'Crime/alert details are required to escalate' };
   if (findings.length > DETAILS_MAX) return { error: `Crime/alert details are too long (max ${DETAILS_MAX} characters)` };
+  const template = String(b?.notify_template ?? '').trim();
+  if (!template) return { error: 'The inspection team notification is empty' };
+  if (template.length > TEMPLATE_MAX) return { error: 'The inspection team notification is too long' };
   const rec = String(b?.investigator_rec ?? '').trim();
   const other = String(b?.investigator_rec_other ?? '').trim();
   if (!T.INVESTIGATOR_RECS.includes(rec)) return { error: 'Choose your recommendation for the manager' };
   if (rec === T.OTHERS && !other) return { error: 'Describe the "Others" recommendation' };
   if (other.length > TEXT_MAX) return { error: 'Recommendation description is too long' };
-  return { esc: { findings, investigator_rec: rec, investigator_rec_other: rec === T.OTHERS ? other : null } };
+  return { esc: { findings, notify_template: template, investigator_rec: rec, investigator_rec_other: rec === T.OTHERS ? other : null } };
 }
 
-/* Heightened Monitoring pop-up: crime/alert details are entered; BU comes from the case, the rest is auto-populated. */
-function validateHm(b, bu) {
-  if (!b || typeof b !== 'object') return { error: 'Heightened Monitoring details are required', code: 'HM_REQUIRED' };
-  const crime = String(b.crime_details ?? '').trim();
-  const template = String(b.notify_template ?? '').trim();
-  if (!crime) return { error: 'Crime/alert details are required' };
-  if (crime.length > DETAILS_MAX) return { error: `Crime/alert details are too long (max ${DETAILS_MAX} characters)` };
-  if (!template) return { error: 'The inspection team notification is empty' };
-  if (template.length > TEMPLATE_MAX) return { error: 'The notification is too long' };
-  return { hm: { bu, crime_details: crime, notify_template: template } };
-}
+// An escalated case whose manager recommendation is recorded is back with the officer:
+// done for the manager (admin Completed), to act on again for the officer (My Cases Active).
+const BACK_FROM_MANAGER = `(c.status='Escalate to Manager' AND EXISTS (SELECT 1 FROM screening_case_escalations x
+  WHERE x.case_id=c.id AND x.manager_at IS NOT NULL AND x.decided_at IS NULL))`;
 const getCase = (id) => db.prepare(`${SELECT} WHERE c.id=?`).get(id);
 const logEvent = (case_id, type, detail, by_user, from_user = null, to_user = null) =>
   db.prepare('INSERT INTO screening_case_events (case_id,type,detail,by_user,from_user,to_user) VALUES (?,?,?,?,?,?)')
@@ -129,11 +125,13 @@ function validateReview(c, b) {
   // An escalated case comes back (True Match / False) only after the manager's recommendation is recorded.
   if (c.status === T.ESCALATE && v.status !== T.ESCALATE && !c.esc_manager_rec)
     return { error: 'This case is waiting for the manager’s recommendation. Once it is recorded you can set True Match or False.' };
+  // True Match only after an escalation is back with the manager's recommendation (or the case is already a True Match).
+  if (v.status === T.TRUE_MATCH && c.status !== T.TRUE_MATCH && !(c.status === T.ESCALATE && c.esc_manager_rec))
+    return { error: 'True Match can only be set after the case is escalated to a manager and the manager’s recommendation is recorded' };
   // Possible waits for a decision: only the listed next statuses are allowed.
   const next = T.NEXT_STATUSES[c.status];
   if (next && v.status !== c.status && !next.includes(v.status))
     return { error: `This case is waiting for a decision ("${c.status}"). Its status can only change to ${next.join(', ')}.` };
-  v.alert_result = T.RESULT_FOR_STATUS[v.status] ?? null;
 
   v.false_reason = null;
   if (v.status === 'False') {
@@ -154,37 +152,52 @@ function validateReview(c, b) {
     v.escalated_at = stillSameEscalation ? c.escalated_at : new Date().toISOString().replace('T', ' ').slice(0, 19);
   }
 
+  // Action plan: required for a True Match, not set otherwise.
   const mod = b.module ? String(b.module) : null;
-  if (mod && !T.MODULE_SLUGS.includes(mod)) return { error: 'Invalid category' };
-  if (T.PENDING_STATUSES.includes(v.status) && mod && mod !== c.module)
-    return { error: `A "${v.status}" case is waiting for a decision and cannot be categorised until it is True Match or False` };
+  if (mod && !T.ACTION_PLANS.includes(mod)) return { error: 'Invalid action plan' };
+  if (v.status === T.TRUE_MATCH && !mod) return { error: 'Choose the action plan for this True Match' };
+  if (v.status !== T.TRUE_MATCH && mod && mod !== c.module) return { error: 'An action plan is chosen only for a True Match' };
   v.module = mod;
+  v.nfa_reason = null;
+  if (mod === T.NFA_SLUG) {
+    const reason = String(b.nfa_reason ?? '').trim() || (c.module === T.NFA_SLUG ? c.nfa_reason : '');
+    if (!reason) return { error: 'Give the reason for closing this case with no further action' };
+    if (reason.length > REASON_MAX) return { error: `Reason is too long (max ${REASON_MAX} characters)` };
+    v.nfa_reason = reason;
+  }
   v.categorised_at = mod === c.module ? c.categorised_at : mod ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null;
   return { v };
 }
 
 export default function registerCaseRoutes(app, { auth, adminOnly, upload, publicUser, findOwner }) {
   const allUsers = () => db.prepare('SELECT * FROM users').all().map(publicUser);
-  const canSee = (user, c) => user.role === 'admin' || c.assigned_to === user.id;
+  // Everyone may view any case (officers: view-only Master Data); only admins and the assigned officer may change it.
+  const canEdit = (user, c) => user.role === 'admin' || c.assigned_to === user.id;
   const loadCase = (req, res, next) => {
     const c = getCase(+req.params.id);
-    if (!c || !canSee(req.user, c)) return res.status(404).json({ error: 'Case not found' });
+    if (!c) return res.status(404).json({ error: 'Case not found' });
     req.scase = c; next();
   };
+  const ownCase = (req, res, next) => (canEdit(req.user, req.scase) ? next()
+    : res.status(403).json({ error: 'This case is not assigned to you (view only)' }));
 
   /* sidebar counts per view: all | uncategorised | <module> */
   app.get('/api/cases/counts', auth, (req, res) => {
-    const blank = () => ({ mine: 0, unassigned: 0, active: 0, escalated_to_me: 0, awaiting_my_rec: 0 });
+    const blank = () => ({ mine: 0, unassigned: 0, active: 0, open: 0, mine_open: 0, mine_working: 0, mine_pending: 0, escalated_to_me: 0, awaiting_my_rec: 0 });
     const out = { all: blank(), uncategorised: blank(), ...Object.fromEntries(T.MODULE_SLUGS.map((s) => [s, blank()])) };
     const rows = db.prepare(`SELECT COALESCE(module,'uncategorised') view,
       SUM(assigned_to=? AND status!='False') mine, SUM(assigned_to IS NULL AND status!='False') unassigned,
-      SUM(status!='False') active, SUM(escalated_to=? AND status=?) escalated_to_me,
+      SUM(status!='False') active, SUM(status NOT IN (?, ?) AND NOT ${BACK_FROM_MANAGER}) open,
+      SUM(assigned_to=? AND status NOT IN (?, ?)) mine_open,
+      SUM(assigned_to=? AND (status NOT IN (?, ?, ?) OR ${BACK_FROM_MANAGER})) mine_working,
+      SUM(assigned_to=? AND status=? AND NOT ${BACK_FROM_MANAGER}) mine_pending,
+      SUM(escalated_to=? AND status=?) escalated_to_me,
       SUM(escalated_to=? AND status=? AND NOT EXISTS (SELECT 1 FROM screening_case_escalations e
         WHERE e.case_id=c.id AND e.decided_at IS NULL AND e.manager_at IS NOT NULL)) awaiting_my_rec
-      FROM screening_cases c GROUP BY view`).all(req.user.id, req.user.id, T.ESCALATE, req.user.id, T.ESCALATE);
+      FROM screening_cases c GROUP BY view`).all(req.user.id, ...T.DECISION_STATUSES, req.user.id, ...T.DECISION_STATUSES,
+      req.user.id, ...T.DECISION_STATUSES, T.ESCALATE, req.user.id, T.ESCALATE, req.user.id, T.ESCALATE, req.user.id, T.ESCALATE);
     for (const r of rows) {
-      if (!out[r.view]) continue;
-      for (const k of Object.keys(out.all)) { out[r.view][k] = r[k] || 0; out.all[k] += r[k] || 0; }
+      for (const k of Object.keys(out.all)) { if (out[r.view]) out[r.view][k] = r[k] || 0; out.all[k] += r[k] || 0; }
     }
     res.json(out);
   });
@@ -193,14 +206,23 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
   app.get('/api/cases', auth, (req, res) => {
     const q = req.query; const where = []; const p = [];
     if (q.view === 'uncategorised') where.push('c.module IS NULL');
-    else if (T.MODULE_SLUGS.includes(q.view)) { where.push('c.module=?'); p.push(q.view); }
-    const scope = req.user.role === 'admin' ? (q.scope || 'all') : 'mine';
+    else if (T.ACTION_PLANS.includes(q.view)) { where.push('c.module=?'); p.push(q.view); }
+    // officers: their own cases, or every case (view-only Master Data) with scope=all
+    const scope = req.user.role === 'admin' ? (q.scope || 'all') : q.scope === 'all' ? 'all' : 'mine';
     if (scope === 'mine') { where.push('c.assigned_to=?'); p.push(req.user.id); }
     if (scope === 'unassigned') where.push('c.assigned_to IS NULL');
-    if (scope === 'escalated') { where.push('c.escalated_to=? AND (c.status=? OR c.alert_result=?)'); p.push(req.user.id, T.ESCALATE, T.ESCALATE); }
+    if (scope === 'escalated') { where.push('c.escalated_to=? AND c.status=?'); p.push(req.user.id, T.ESCALATE); }
     if (q.assignee && req.user.role === 'admin') { where.push('c.assigned_to=?'); p.push(+q.assignee); }
     if (q.tab === 'active') where.push("c.status!='False'");
     if (q.tab === 'false') where.push("c.status='False'");
+    // All Cases: open = still waiting for a decision · completed = closed as True Match / False
+    // admins: a case leaves Active (goes to Completed) once the manager recommendation is recorded
+    const isAdm = req.user.role === 'admin';
+    if (q.tab === 'open') { where.push(`c.status NOT IN (?, ?)${isAdm ? ` AND NOT ${BACK_FROM_MANAGER}` : ''}`); p.push(...T.DECISION_STATUSES); }
+    // My Cases: working = the officer's to act on · pending = escalated to a manager
+    if (q.tab === 'working') { where.push(`(c.status NOT IN (?, ?, ?) OR ${BACK_FROM_MANAGER})`); p.push(...T.DECISION_STATUSES, T.ESCALATE); }
+    if (q.tab === 'pending') { where.push(`c.status=? AND NOT ${BACK_FROM_MANAGER}`); p.push(T.ESCALATE); }
+    if (q.tab === 'completed') { where.push(`(c.status IN (?, ?)${isAdm ? ` OR ${BACK_FROM_MANAGER}` : ''})`); p.push(...T.DECISION_STATUSES); }
     if (q.search) { const s = `%${q.search}%`; where.push('(c.request_no LIKE ? OR c.company LIKE ? OR c.wc_reference LIKE ? OR c.matched_party LIKE ? OR c.bu LIKE ?)'); p.push(s, s, s, s, s); }
     res.json(db.prepare(`${SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY c.status='False', c.id DESC`).all(...p));
   });
@@ -268,18 +290,15 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
   });
 
   /* officer review: full form, every field mandatory */
-  app.put('/api/cases/:id/review', auth, loadCase, (req, res) => {
+  app.put('/api/cases/:id/review', auth, loadCase, ownCase, (req, res) => {
     const c = req.scase;
     const { v, error } = validateReview(c, req.body || {});
     if (error) return res.status(400).json({ error });
 
-    // Heightened Monitoring needs its extra details (once; sending them again updates them).
+    // Heightened Monitoring: its details come from the escalation report (a True Match is always escalated first).
     let hm = null;
-    if (v.module === T.HM_SLUG && (!c.hm_date || req.body.hm)) {
-      const r = validateHm(req.body.hm, v.bu);
-      if (r.error) return res.status(400).json({ error: r.error, code: r.code });
-      hm = r.hm;
-    }
+    if (v.module === T.HM_SLUG && !c.hm_date)
+      hm = { bu: v.bu, crime_details: c.esc_findings || '—', notify_template: c.esc_template || '' };
     // Escalate to Manager needs the officer's recommendation (required when escalating, editable while open).
     let esc = null;
     if (v.status === T.ESCALATE && (c.status !== T.ESCALATE || !c.esc_id || c.esc_decided_at || req.body.escalation)) {
@@ -301,12 +320,12 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
         const open = c.status === T.ESCALATE && c.esc_id && !c.esc_decided_at;
         if (open) {
           db.prepare(`UPDATE screening_case_escalations SET escalated_at=@escalated_at, escalated_to=@escalated_to, bu=@bu, alert_category=@alert_category,
-            findings=@findings, investigator_rec=@investigator_rec, investigator_rec_other=@investigator_rec_other WHERE id=@id`).run({ ...row, id: c.esc_id });
+            findings=@findings, notify_template=@notify_template, investigator_rec=@investigator_rec, investigator_rec_other=@investigator_rec_other WHERE id=@id`).run({ ...row, id: c.esc_id });
           logEvent(c.id, 'updated', `Escalation report updated · Investigator recommendation: ${recText(esc.investigator_rec, esc.investigator_rec_other)}`, req.user.id);
         } else {
           db.prepare(`INSERT INTO screening_case_escalations (case_id,escalated_at,escalated_to,escalated_by,bu,company,alert_category,
-            investigator_id,investigator_name,findings,investigator_rec,investigator_rec_other) VALUES (@case_id,@escalated_at,@escalated_to,@escalated_by,@bu,@company,
-            @alert_category,@investigator_id,@investigator_name,@findings,@investigator_rec,@investigator_rec_other)`).run(row);
+            investigator_id,investigator_name,findings,notify_template,investigator_rec,investigator_rec_other) VALUES (@case_id,@escalated_at,@escalated_to,@escalated_by,@bu,@company,
+            @alert_category,@investigator_id,@investigator_name,@findings,@notify_template,@investigator_rec,@investigator_rec_other)`).run(row);
         }
       }
       // the case comes back from the manager: record the officer's True Match / False on the escalation
@@ -323,7 +342,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
             notify_template=@notify_template, recorded_by=@recorded_by, updated_at=datetime('now')`)
           .run({ case_id: c.id, ...hm, company: c.company, alert_category: v.alert_category, investigator_id: investigator.id,
             investigator_name: investigator.name, recorded_by: req.user.id });
-        logEvent(c.id, 'monitoring', `${c.hm_date ? 'Updated' : 'Recorded'} Heightened Monitoring details · BU: ${hm.bu}`, req.user.id);
+        logEvent(c.id, 'monitoring', `Heightened Monitoring recorded from the escalation report · BU: ${hm.bu}`, req.user.id);
       }
       if (!changed.length) return;
       // keep the BU shown in the HM / open escalation details in step with the case
@@ -336,12 +355,13 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       const plain = ['app_type', 'bu', 'wc_reference', 'matched_party', 'alert_category'].filter((f) => changed.includes(f));
       if (plain.length) logEvent(c.id, 'updated', plain.map((f) => `${LABELS[f]}: ${v[f]}`).join(' · '), req.user.id);
       if (changed.includes('status'))
-        logEvent(c.id, 'status', `${c.status} → ${v.status} · Alert Result: ${v.alert_result || '—'}`, req.user.id);
+        logEvent(c.id, 'status', `${c.status} → ${v.status}`, req.user.id);
       if (v.status === T.ESCALATE && (v.escalated_to !== c.escalated_to || c.status !== T.ESCALATE))
         logEvent(c.id, 'escalated', `Officer recommendation: ${recText(esc?.investigator_rec, esc?.investigator_rec_other) || '—'} · waiting for the manager’s decision`, req.user.id, null, v.escalated_to);
       if (v.false_reason && v.false_reason !== c.false_reason) addRemark(c.id, req.user.id, `Reason for False: ${v.false_reason}`);
+      if (v.nfa_reason && v.nfa_reason !== c.nfa_reason) addRemark(c.id, req.user.id, `Reason for no further action: ${v.nfa_reason}`);
       if (changed.includes('module'))
-        logEvent(c.id, 'categorised', `${c.module ? MODULE_NAME[c.module] : 'Uncategorised'} → ${v.module ? MODULE_NAME[v.module] : 'Uncategorised'}`, req.user.id);
+        logEvent(c.id, 'categorised', `Action plan: ${c.module ? MODULE_NAME[c.module] : 'None'} → ${v.module ? MODULE_NAME[v.module] : 'None'}`, req.user.id);
     })();
     res.json(getCase(c.id));
   });
@@ -425,7 +445,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
   const listRemarks = (id) => db.prepare(`SELECT r.id, r.case_id, r.body, r.created_at, r.user_id, u.name user_name, u.role user_role, u.title user_title
     FROM screening_case_remarks r LEFT JOIN users u ON u.id=r.user_id WHERE r.case_id=? ORDER BY r.id`).all(id);
   app.get('/api/cases/:id/remarks', auth, loadCase, (req, res) => res.json(listRemarks(req.scase.id)));
-  app.post('/api/cases/:id/remarks', auth, loadCase, (req, res) => {
+  app.post('/api/cases/:id/remarks', auth, loadCase, ownCase, (req, res) => {
     const body = String(req.body?.body ?? '').trim();
     if (!body) return res.status(400).json({ error: 'Remark cannot be empty' });
     if (body.length > REMARK_MAX) return res.status(400).json({ error: `Remark is too long (max ${REMARK_MAX} characters)` });

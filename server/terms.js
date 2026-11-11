@@ -19,15 +19,16 @@ export const MODULES = [
 ];
 export const MODULE_SLUGS = MODULES.map((m) => m.slug);
 export const HM_SLUG = 'heightened-monitoring';
+// Action plan (chosen once a case is a True Match): one of the module menus, or close it with no further action (reason required).
+export const NFA_SLUG = 'no-further-action';
+export const ACTION_PLANS = [...MODULE_SLUGS, NFA_SLUG];
 // Inspection team mailbox used by "Notify inspection team" (blank = choose recipient in the mail app).
 export const INSPECTION_TEAM_EMAIL = process.env.INSPECTION_TEAM_EMAIL || '';
 export const ESCALATE = 'Escalate to Manager';
 export const POSSIBLE = 'Possible';
-export const CASE_STATUSES = ['Under Review', 'False', POSSIBLE, ESCALATE, 'Requested Further Documents', 'True Match'];
-export const ALERT_RESULTS = ['True Match', 'False Match', POSSIBLE, ESCALATE];
-// Alert Result is not chosen: it follows the Status. Statuses not listed (Under Review,
-// Requested Further Documents) have no result yet, so the Alert Result stays locked.
-export const RESULT_FOR_STATUS = { 'True Match': 'True Match', False: 'False Match', [POSSIBLE]: POSSIBLE, [ESCALATE]: ESCALATE };
+export const TRUE_MATCH = 'True Match';
+export const CASE_STATUSES = ['Under Review', 'False', POSSIBLE, ESCALATE, 'Requested Further Documents', TRUE_MATCH];
+// True Match is not picked from the Status list: it is a checkbox, offered only after an escalation comes back with the manager's recommendation.
 // "Possible" and "Escalate to Manager" wait for a decision (the application is on hold).
 // Possible may be escalated to a manager; an escalation comes back only as True Match or False.
 export const PENDING_STATUSES = [POSSIBLE, ESCALATE];
@@ -37,7 +38,7 @@ export const OTHERS = 'Others';
 export const INVESTIGATOR_RECS = ['Heightened Monitoring', 'SAR', 'PCC', 'Court Clearance Certificate', OTHERS];
 export const AGREED = 'Agreed to officer recommendation';
 export const MANAGER_RECS = [AGREED, 'Heightened Monitoring', 'PCC', 'Court Clearance Certificate', 'SAR', OTHERS];
-export const NEXT_STATUSES ={ [POSSIBLE]: [...DECISION_STATUSES, ESCALATE], [ESCALATE]: DECISION_STATUSES };
+export const NEXT_STATUSES = { [POSSIBLE]: ['False', ESCALATE], [ESCALATE]: DECISION_STATUSES };
 export const ALERT_CATEGORIES = ['PEP', 'Sanctions', 'Law Enforcement', 'Regulatory Enforcement', 'Adverse Media', 'State Owned Enterprise', 'Other'];
 
 export const GLOSSARY = [

@@ -230,6 +230,16 @@ if (!db.prepare('PRAGMA table_info(screening_cases)').all().some((c) => c.name =
   })();
 }
 
+// "No further action" action plan: the officer's reason for closing the case.
+if (!db.prepare('PRAGMA table_info(screening_cases)').all().some((c) => c.name === 'nfa_reason')) {
+  db.exec('ALTER TABLE screening_cases ADD COLUMN nfa_reason TEXT');
+}
+
+// Escalation report: the "Notify inspection team" message written by the officer.
+if (!db.prepare('PRAGMA table_info(screening_case_escalations)').all().some((c) => c.name === 'notify_template')) {
+  db.exec('ALTER TABLE screening_case_escalations ADD COLUMN notify_template TEXT');
+}
+
 // Escalation managers: admins who receive "Escalate to Manager" cases (initially Yaser and Raneem).
 if (!db.prepare('PRAGMA table_info(users)').all().some((c) => c.name === 'escalation_manager')) {
   db.exec('ALTER TABLE users ADD COLUMN escalation_manager INTEGER NOT NULL DEFAULT 0');
