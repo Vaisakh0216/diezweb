@@ -4,7 +4,7 @@
   "description": "DIEZ Anti-Money Laundering: EDD and case management (React client + Express/SQLite server)",
   "scripts": {
     "build": "npm --prefix client ci --include=dev && npm --prefix client run build && npm --prefix server ci --omit=dev",
-    "start": "node server/index.js"
+    "start": "node --env-file-if-exists=server/.env server/index.js"
   },
   "engines": { "node": ">=20" }
 }

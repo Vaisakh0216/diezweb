@@ -3,3 +3,6 @@ dist/
 *.db
 *.db-*
 server.log
+.env
+.env.*
+!.env.example
