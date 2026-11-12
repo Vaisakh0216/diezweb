@@ -12,7 +12,6 @@ export const TITLES = ['Assistant Director', 'Assistant Manager', 'Senior AML Of
  * Admin creates a case (uncategorised) -> officer reviews -> case is categorised
  * into one of the MODULES (True Match / HM / RF / SAR). */
 export const MODULES = [
-  { slug: 'true-match', name: 'True Match' },
   { slug: 'heightened-monitoring', name: 'Heightened Monitoring', short: 'HM' },
   { slug: 'red-flag', name: 'Red Flag', short: 'RF' },
   { slug: 'sar', name: 'Suspicious Activity Report', short: 'SAR' },

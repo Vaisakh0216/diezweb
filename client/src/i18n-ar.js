@@ -345,8 +345,8 @@ const exact = {
   'User created': 'تم إنشاء المستخدم',
 
   /* ---------- cases: lists ---------- */
-  'Create cases and assign them to the team. A confirmed True Match gets an action plan: True Match, HM, Red Flag, SAR or no further action.':
-    'أنشئ الحالات وأسندها إلى الفريق. يحصل التطابق الحقيقي المؤكد على خطة إجراء: تطابق حقيقي أو مراقبة مشددة أو مؤشر خطر أو تقرير نشاط مشبوه أو لا يلزم إجراء إضافي.',
+  'Create cases and assign them to the team. A confirmed True Match gets an action plan: Red Flag, HM, SAR or no further action.':
+    'أنشئ الحالات وأسندها إلى الفريق. يحصل التطابق الحقيقي المؤكد على خطة إجراء: مؤشر خطر أو مراقبة مشددة أو تقرير نشاط مشبوه أو لا يلزم إجراء إضافي.',
   'Cases assigned to you. Open a case and complete the review: every field is required.': 'الحالات المسندة إليك. افتح الحالة وأكمل المراجعة: جميع الحقول مطلوبة.',
   'Every case across the team. View only: your own cases are under My Cases.': 'جميع حالات الفريق. للعرض فقط: حالاتك موجودة في حالاتي.',
   'Assigned to me': 'المسندة إليّ',
@@ -425,7 +425,7 @@ const exact = {
   'confirmed after the manager’s recommendation': 'مؤكد بعد توصية المدير',
   'Heightened Monitoring uses the details from the escalation report.': 'تستخدم المراقبة المشددة التفاصيل من تقرير التصعيد.',
   'The case is closed with no further action.': 'تُغلق الحالة دون إجراء إضافي.',
-  'Moves the case into the True Match, Heightened Monitoring, Red Flag or SAR menu.': 'تنقل الحالة إلى قائمة التطابق الحقيقي أو المراقبة المشددة أو مؤشر الخطر أو تقرير النشاط المشبوه.',
+  'Moves the case into the Heightened Monitoring, Red Flag or SAR menu.': 'تنقل الحالة إلى قائمة المراقبة المشددة أو مؤشر الخطر أو تقرير النشاط المشبوه.',
   'Reason for closing it as no further action': 'سبب إغلاقها دون إجراء إضافي',
   'Reason for no further action': 'سبب عدم اتخاذ إجراء إضافي',
   'Save review': 'حفظ المراجعة',

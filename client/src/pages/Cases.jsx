@@ -192,7 +192,8 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
     setF({
       ...f,
       status: on ? TM : c.status !== TM ? c.status : statusOptions[0],
-      ...(on ? {} : { module: c.status === TM ? "" : c.module || "" }),
+      // a True Match goes to Red Flag unless the officer picks another action plan
+      ...(on ? { module: f.module || "red-flag" } : { module: c.status === TM ? "" : c.module || "" }),
     });
   const isNFA = isTM && f.module === NFA.slug;
   const needReason = f.status === "False";
@@ -681,7 +682,7 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
                 ? "Heightened Monitoring uses the details from the escalation report."
                 : isNFA
                 ? "The case is closed with no further action."
-                : "Moves the case into the True Match, Heightened Monitoring, Red Flag or SAR menu."}
+                : "Moves the case into the Heightened Monitoring, Red Flag or SAR menu."}
             </span>
           </div>
         )}
@@ -1707,7 +1708,7 @@ export default function Cases() {
               : readOnly
               ? "Every case across the team. View only: your own cases are under My Cases."
               : isAdmin
-              ? "Create cases and assign them to the team. A confirmed True Match gets an action plan: True Match, HM, Red Flag, SAR or no further action."
+              ? "Create cases and assign them to the team. A confirmed True Match gets an action plan: Red Flag, HM, SAR or no further action."
               : "Cases assigned to you. Open a case and complete the review: every field is required."}
           </p>
         </div>

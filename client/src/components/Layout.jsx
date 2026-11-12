@@ -9,7 +9,6 @@ import LangToggle from "./LangToggle.jsx";
 
 /** Case categories, shown as sub-menus of Cases (slugs match server/terms.js MODULES) */
 export const CASE_MODULES = [
-  { slug: "true-match", name: "True Match", icon: "🎯" },
   {
     slug: "heightened-monitoring",
     name: "Heightened Monitoring",

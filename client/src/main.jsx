@@ -81,6 +81,8 @@ function App() {
           }
         />
         <Route path="/cases" element={<Cases />} />
+        {/* the True Match menu was retired: those cases are under Red Flag */}
+        <Route path="/cases/true-match" element={<Navigate to="/cases/red-flag" replace />} />
         <Route path="/cases/:view" element={<Cases />} />
         <Route path="/module/:slug" element={<LegacyModuleRedirect />} />
         <Route path="/glossary" element={<Glossary />} />

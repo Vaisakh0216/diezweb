@@ -79,6 +79,10 @@ export async function connectDb() {
     if (top?.id) await col('counters').updateOne({ _id: name }, { $max: { seq: top.id } }, { upsert: true });
   }
 
+  // the "True Match" action plan was retired: those cases belong under Red Flag
+  const moved = await col('screening_cases').updateMany({ module: 'true-match' }, { $set: { module: 'red-flag', updated_at: now() } });
+  if (moved.modifiedCount) console.log(`Moved ${moved.modifiedCount} case(s) from the True Match action plan to Red Flag`);
+
   // first start on an empty database: demo team (change these passwords after the first sign-in)
   if (!(await col('users').findOne({}))) {
     const tmp = bcrypt.hashSync('Welcome@123', 10);
