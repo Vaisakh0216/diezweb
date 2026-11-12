@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env index.js",
     "dev": "node --env-file-if-exists=.env --watch index.js",
-    "seed:mongo": "node --env-file-if-exists=.env seed-mongo.js"
+    "seed:mongo": "node --env-file-if-exists=.env seed-mongo.js",
+    "check:mongo": "node --env-file-if-exists=.env check-mongo.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
