@@ -12,6 +12,8 @@ export const COLLECTIONS = ['users', 'uploads', 'edd_cases', 'case_events', 'cas
 
 let client;
 let database;
+/** connection state for /api/health and the "database unavailable" answer */
+export const dbState = { ready: false, error: null, attempts: 0 };
 
 /** Database name: MONGODB_DB, else the name in MONGODB_URI, else "diez_aml". */
 export function dbNameFrom(uri) {
@@ -38,9 +40,21 @@ export async function insert(name, doc) {
   return id;
 }
 
+/** plain-language reason for a failed connection */
+export function explainDbError(e) {
+  const m = String(e?.message || e);
+  if (/MONGODB_URI is not set/.test(m)) return m;
+  if (/tlsv1 alert|SSL alert number 80|Server selection timed out|ETIMEDOUT/i.test(m))
+    return 'MongoDB Atlas refused the connection: add this server to Atlas → Network Access (e.g. 0.0.0.0/0).';
+  if (/ENOTFOUND|querySrv/i.test(m)) return 'MongoDB cluster address not found: check the host in MONGODB_URI.';
+  if (/auth|bad auth|Authentication failed/i.test(m)) return 'MongoDB rejected the username/password in MONGODB_URI (Atlas → Database Access).';
+  return `MongoDB connection failed: ${m}`;
+}
+
 export async function connectDb() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set (server/.env locally, Environment variables on Hostinger).');
+  dbState.attempts++;
   client = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 });
   await client.connect();
   database = client.db(dbNameFrom(uri));
@@ -72,6 +86,7 @@ export async function connectDb() {
     }
     console.log('Seeded admin@edd.local / admin123 and team (<firstname>@edd.local / Welcome@123)');
   }
+  dbState.ready = true; dbState.error = null;
   console.log(`MongoDB connected: database "${database.databaseName}"`);
   return database;
 }

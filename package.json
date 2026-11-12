@@ -1,8 +1,7 @@
 {
   "name": "diez-aml",
   "private": true,
-  "type": "module",
-  "description": "DIEZ Anti-Money Laundering: EDD and case management (React client + Express/SQLite server)",
+  "description": "DIEZ Anti-Money Laundering: EDD and case management (React client + Express/MongoDB server)",
   "main": "server.js",
   "scripts": {
     "postinstall": "npm run build",

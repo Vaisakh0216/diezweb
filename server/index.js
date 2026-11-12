@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
-import { connectDb, col, insert, now, strip } from './db.js';
+import { connectDb, col, insert, now, strip, dbState, explainDbError } from './db.js';
 import * as T from './terms.js';
 import registerCaseRoutes from './cases.js';
 import { existsSync } from 'node:fs';
@@ -17,6 +17,14 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 
 app.use(cors());
 app.use(express.json());
+
+// database status (no login needed): open /api/health in the browser to check the deployment
+app.get('/api/health', (req, res) => res.status(dbState.ready ? 200 : 503).json({
+  ok: dbState.ready, database: dbState.ready ? 'connected' : 'not connected', error: dbState.error, attempts: dbState.attempts,
+}));
+// until MongoDB is connected, API calls get a clear answer instead of failing
+app.use('/api', (req, res, next) => (dbState.ready ? next()
+  : res.status(503).json({ error: `The database is not available yet. ${dbState.error || 'Connecting…'}` })));
 
 // async route handlers: send errors to the error handler instead of leaving the request hanging
 for (const m of ['get', 'post', 'put', 'patch', 'delete']) {
@@ -543,5 +551,13 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   res.status(500).json({ error: 'Something went wrong. Please try again.' });
 });
 
-await connectDb();
+// start serving right away; connect to MongoDB in the background and keep retrying until it works
 app.listen(PORT, () => console.log(`EDD API running on http://localhost:${PORT}`));
+(async function connectLoop() {
+  try { await connectDb(); }
+  catch (e) {
+    dbState.error = explainDbError(e);
+    console.error(`${dbState.error} Retrying in 15s… (${e.message})`);
+    setTimeout(connectLoop, 15000);
+  }
+})();
