@@ -3,6 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context.jsx";
 import { ORG } from "../org.js";
 import { ThemeToggle } from "../theme.jsx";
+import LangToggle from "../components/LangToggle.jsx";
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -52,7 +53,10 @@ export default function Login() {
           <div style={{ gridColumn: '1/-1' }}>🕵️ Suspicious Activity Report</div>
         </div> */}
       </section>
-      <ThemeToggle className="login-theme" />
+      <div className="login-tools">
+        <LangToggle />
+        <ThemeToggle />
+      </div>
       <section className="login-panel">
         <form className="card login-card" onSubmit={submit}>
           <h1 style={{ fontSize: 26 }}>Welcome back</h1>

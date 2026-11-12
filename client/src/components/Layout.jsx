@@ -5,6 +5,7 @@ import { api } from "../api.js";
 import Icon from "./Icon.jsx";
 import { ORG } from "../org.js";
 import { ThemeToggle } from "../theme.jsx";
+import LangToggle from "./LangToggle.jsx";
 
 /** Case categories, shown as sub-menus of Cases (slugs match server/terms.js MODULES) */
 export const CASE_MODULES = [
@@ -265,6 +266,7 @@ export default function Layout() {
               {user.title || user.role}
             </div>
           </div>
+          <LangToggle />
           <ThemeToggle />
           <button
             className="btn btn-sm btn-ghost icon-btn"

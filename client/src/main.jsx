@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom';
 import './index.css';
 import { applyTheme } from './theme.jsx';
+import { startI18n } from './i18n.js';
 
 applyTheme();
 import { AuthProvider, ToastProvider, useAuth } from './context.jsx';
@@ -61,6 +62,8 @@ function App() {
     </Routes>
   );
 }
+
+startI18n();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>

@@ -7,12 +7,14 @@
       // apply the saved / system theme before the first paint (no flash)
       (function () { var p; try { p = localStorage.getItem('diez.theme'); } catch (e) {}
         var dark = p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light'); })();
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        var ar = false; try { ar = localStorage.getItem('diez.lang') === 'ar'; } catch (e) {}
+        if (ar) { document.documentElement.setAttribute('lang', 'ar'); document.documentElement.setAttribute('dir', 'rtl'); } })();
     </script>
     <title>DIEZ | Anti-Money Laundering</title>
     <meta name="description" content="DIEZ Anti-Money Laundering: Enhanced Due Diligence, True Match, Heightened Monitoring, Red Flag and SAR case management." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>
