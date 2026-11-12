@@ -1,9 +1,14 @@
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'node:url';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { TEAM, APP_TYPES, BUS } from './terms.js';
 
-const db = new Database(fileURLToPath(new URL('./edd.db', import.meta.url)));
+// DB_PATH: where the SQLite file lives (production: a folder outside the app, so redeploys keep the data)
+const DB_PATH = process.env.DB_PATH || fileURLToPath(new URL('./edd.db', import.meta.url));
+mkdirSync(dirname(DB_PATH), { recursive: true });
+const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 

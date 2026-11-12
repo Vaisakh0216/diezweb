@@ -7,6 +7,8 @@ import * as XLSX from 'xlsx';
 import db from './db.js';
 import * as T from './terms.js';
 import registerCaseRoutes from './cases.js';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -473,5 +475,14 @@ app.post('/api/edd/cases/:id/remarks', auth, (req, res) => {
 });
 
 registerCaseRoutes(app,{ auth, adminOnly, upload, publicUser, findOwner });
+
+// Production: serve the built website (client/dist) from the same server, so /api works on the same domain.
+const CLIENT_DIST = fileURLToPath(new URL('../client/dist', import.meta.url));
+if (existsSync(CLIENT_DIST)) {
+  app.use(express.static(CLIENT_DIST, { index: false, maxAge: '1h' }));
+  app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
+  // any other path is a page of the app (React router)
+  app.get('*', (req, res) => res.sendFile(`${CLIENT_DIST}/index.html`));
+}
 
 app.listen(PORT,() => console.log(`EDD API running on http://localhost:${PORT}`));
