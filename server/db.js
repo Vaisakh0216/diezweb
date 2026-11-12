@@ -41,9 +41,14 @@ export async function insert(name, doc) {
 }
 
 /** plain-language reason for a failed connection */
+/** hide user:password in any text that contains a connection string */
+export const redact = (s) => String(s ?? '').replace(/(mongodb(?:\+srv)?:\/\/)[^/\s"']*@/gi, '$1<user>:<password>@');
+
 export function explainDbError(e) {
-  const m = String(e?.message || e);
+  const m = redact(e?.message || e);
   if (/MONGODB_URI is not set/.test(m)) return m;
+  if (/Protocol and host list are required|Invalid scheme|URI must include|Password contains unescaped|Username contains unescaped|mongodb\+srv URI cannot have/i.test(m))
+    return 'MONGODB_URI is not a valid connection string: it must look like mongodb+srv://USER:PASSWORD@HOST/… with exactly one "@" (special characters in the password must be URL-encoded).';
   if (/tlsv1 alert|SSL alert number 80|Server selection timed out|ETIMEDOUT/i.test(m))
     return 'MongoDB Atlas refused the connection: add this server to Atlas → Network Access (e.g. 0.0.0.0/0).';
   if (/ENOTFOUND|querySrv/i.test(m)) return 'MongoDB cluster address not found: check the host in MONGODB_URI.';

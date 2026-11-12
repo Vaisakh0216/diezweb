@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
-import { connectDb, col, insert, now, strip, dbState, explainDbError } from './db.js';
+import { connectDb, col, insert, now, strip, dbState, explainDbError, redact } from './db.js';
 import * as T from './terms.js';
 import registerCaseRoutes from './cases.js';
 import { existsSync } from 'node:fs';
@@ -557,7 +557,7 @@ app.listen(PORT, () => console.log(`EDD API running on http://localhost:${PORT}`
   try { await connectDb(); }
   catch (e) {
     dbState.error = explainDbError(e);
-    console.error(`${dbState.error} Retrying in 15s… (${e.message})`);
+    console.error(`${dbState.error} Retrying in 15s… (${redact(e.message)})`);
     setTimeout(connectLoop, 15000);
   }
 })();
