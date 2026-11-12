@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
-import db from './db.js';
+import { connectDb, col, insert, now, strip } from './db.js';
 import * as T from './terms.js';
 import registerCaseRoutes from './cases.js';
 import { existsSync } from 'node:fs';
@@ -18,30 +18,40 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 
 app.use(cors());
 app.use(express.json());
 
+// async route handlers: send errors to the error handler instead of leaving the request hanging
+for (const m of ['get', 'post', 'put', 'patch', 'delete']) {
+  const orig = app[m].bind(app);
+  app[m] = (path, ...handlers) => (handlers.length ? orig(path, ...handlers.map((h) => (typeof h === 'function' && h.length < 4
+    ? (req, res, next) => { try { const r = h(req, res, next); if (r?.catch) r.catch(next); } catch (e) { next(e); } }
+    : h))) : orig(path));
+}
+
 /* ================= helpers ================= */
-const J = (s, d = []) => { try { return JSON.parse(s); } catch { return d; } };
+// stored values are real arrays/objects in MongoDB (JSON text in data from older exports)
+const J = (s, d = []) => { if (s == null) return d; if (typeof s !== 'string') return s; try { return JSON.parse(s); } catch { return d; } };
 const publicUser = (u) => u && ({
   id: u.id, name: u.name, email: u.email, role: u.role, title: u.title,
-  duties: J(u.duties), bus: J(u.bus), aliases: u.aliases, status: u.status, created_at: u.created_at,
+  duties: J(u.duties), bus: J(u.bus), aliases: u.aliases || '', status: u.status, created_at: u.created_at,
   escalation_manager: !!u.escalation_manager,
 });
 // only admins can receive escalations
 const escFlag = (b) => (b.role === 'admin' && b.escalation_manager ? 1 : 0);
-const getUser = (id) => publicUser(db.prepare('SELECT * FROM users WHERE id=?').get(id));
+const getUser = async (id) => publicUser(await col('users').findOne({ id }));
+const usersById = async () => Object.fromEntries((await col('users').find().toArray()).map((u) => [u.id, u]));
+const rx = (s) => new RegExp(String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
 
-function auth(req, res, next) {
+async function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
   try {
     const { id } = jwt.verify(token, SECRET);
-    req.user = getUser(id);
+    req.user = await getUser(id);
     if (!req.user) throw new Error();
-    next();
-  } catch { res.status(401).json({ error: 'Unauthorized' }); }
+  } catch { return res.status(401).json({ error: 'Unauthorized' }); }
+  next();
 }
 const adminOnly = (req, res, next) => (req.user.role === 'admin' ? next() : res.status(403).json({ error: 'Admin only' }));
 const logEvent = (case_id, type, detail, by_user, from_user = null, to_user = null) =>
-  db.prepare('INSERT INTO case_events (case_id,type,detail,by_user,from_user,to_user) VALUES (?,?,?,?,?,?)')
-    .run(case_id, type, detail ?? null, by_user ?? null, from_user, to_user);
+  insert('case_events', { case_id, type, detail: detail ?? null, from_user, to_user, by_user: by_user ?? null, at: now() });
 
 /* ---------- dates ---------- */
 const pad = (n) => String(n).padStart(2, '0');
@@ -137,10 +147,16 @@ function findOwner(users, ownerName) {
     || null;
 }
 
+/** open (work queue) applications per officer */
+async function openLoad() {
+  const rows = await col('edd_cases').aggregate([{ $match: { edd_status: null } }, { $group: { _id: '$assigned_to', c: { $sum: 1 } } }]).toArray();
+  return Object.fromEntries(rows.map((r) => [r._id, r.c]));
+}
+
 /* ================= auth & meta ================= */
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
-  const u = db.prepare('SELECT * FROM users WHERE email=?').get(String(email || '').toLowerCase().trim());
+  const u = await col('users').findOne({ email: String(email || '').toLowerCase().trim() });
   if (!u || !bcrypt.compareSync(password || '', u.password_hash)) return res.status(401).json({ error: 'Invalid email or password' });
   res.json({ token: jwt.sign({ id: u.id }, SECRET, { expiresIn: '12h' }), user: publicUser(u) });
 });
@@ -155,9 +171,10 @@ app.get('/api/meta', (req, res) => res.json({
 }));
 
 /* ================= users ================= */
-app.get('/api/users', auth, (req, res) => {
-  const counts = Object.fromEntries(db.prepare('SELECT assigned_to, COUNT(*) c FROM edd_cases WHERE edd_status IS NULL GROUP BY assigned_to').all().map((r) => [r.assigned_to, r.c]));
-  res.json(db.prepare('SELECT * FROM users ORDER BY role, name').all().map(publicUser).map((u) => ({ ...u, open_cases: counts[u.id] || 0 })));
+app.get('/api/users', auth, async (req, res) => {
+  const counts = await openLoad();
+  const users = await col('users').find().sort({ role: 1, name: 1 }).toArray();
+  res.json(users.map(publicUser).map((u) => ({ ...u, open_cases: counts[u.id] || 0 })));
 });
 
 function validateUser(b, isNew) {
@@ -168,40 +185,44 @@ function validateUser(b, isNew) {
   if (b.title && !T.TITLES.includes(b.title)) return 'Invalid title';
   if (!Array.isArray(b.duties) || b.duties.some((d) => !T.APP_TYPES.includes(d))) return 'Invalid duties';
   if (!Array.isArray(b.bus) || b.bus.some((d) => !T.BUS.includes(d))) return 'Invalid business units';
+  if (b.status && !['active', 'on_leave'].includes(b.status)) return 'Invalid status';
   return null;
 }
-const dupErr = (e) => (e.message.includes('UNIQUE') ? 'Email already exists' : e.message);
+const dupErr = (e) => (e.code === 11000 ? 'Email already exists' : e.message);
 
-app.post('/api/users', auth, adminOnly, (req, res) => {
+app.post('/api/users', auth, adminOnly, async (req, res) => {
   const b = req.body; const err = validateUser(b, true);
   if (err) return res.status(400).json({ error: err });
   try {
-    const r = db.prepare('INSERT INTO users (name,email,password_hash,role,title,duties,bus,aliases,status,escalation_manager) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(b.name.trim(), b.email.toLowerCase().trim(), bcrypt.hashSync(b.password, 10), b.role, b.title || null,
-        JSON.stringify(b.duties), JSON.stringify(b.bus), b.aliases || '', b.status || 'active', escFlag(b));
-    res.status(201).json(getUser(r.lastInsertRowid));
+    const id = await insert('users', {
+      name: b.name.trim(), email: b.email.toLowerCase().trim(), password_hash: bcrypt.hashSync(b.password, 10), role: b.role, title: b.title || null,
+      duties: b.duties, bus: b.bus, aliases: b.aliases || '', status: b.status || 'active', created_at: now(), escalation_manager: escFlag(b),
+    });
+    res.status(201).json(await getUser(id));
   } catch (e) { res.status(400).json({ error: dupErr(e) }); }
 });
 
-app.put('/api/users/:id', auth, adminOnly, (req, res) => {
+app.put('/api/users/:id', auth, adminOnly, async (req, res) => {
   const b = req.body; const err = validateUser(b, false);
   if (err) return res.status(400).json({ error: err });
   const id = +req.params.id;
   try {
-    db.prepare('UPDATE users SET name=?, email=?, role=?, title=?, duties=?, bus=?, aliases=?, status=?, escalation_manager=? WHERE id=?')
-      .run(b.name.trim(), b.email.toLowerCase().trim(), b.role, b.title || null, JSON.stringify(b.duties), JSON.stringify(b.bus), b.aliases || '', b.status || 'active', escFlag(b), id);
-    if (b.password) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(b.password, 10), id);
-    res.json(getUser(id));
+    const set = { name: b.name.trim(), email: b.email.toLowerCase().trim(), role: b.role, title: b.title || null, duties: b.duties, bus: b.bus,
+      aliases: b.aliases || '', status: b.status || 'active', escalation_manager: escFlag(b) };
+    if (b.password) set.password_hash = bcrypt.hashSync(b.password, 10);
+    await col('users').updateOne({ id }, { $set: set });
+    res.json(await getUser(id));
   } catch (e) { res.status(400).json({ error: dupErr(e) }); }
 });
 
-app.delete('/api/users/:id', auth, adminOnly, (req, res) => {
+app.delete('/api/users/:id', auth, adminOnly, async (req, res) => {
   const id = +req.params.id;
   if (id === req.user.id) return res.status(400).json({ error: 'You cannot delete yourself' });
-  const open = db.prepare("SELECT COUNT(*) c FROM edd_cases WHERE assigned_to=? AND (edd_status IS NULL OR edd_status!='Approved')").get(id).c;
+  const open = await col('edd_cases').countDocuments({ assigned_to: id, edd_status: { $ne: 'Approved' } });
   if (open) return res.status(400).json({ error: `User has ${open} open case(s). Transfer them first.` });
-  db.prepare('UPDATE edd_cases SET assigned_to=NULL WHERE assigned_to=?').run(id);
-  db.prepare('DELETE FROM users WHERE id=?').run(id);
+  await col('edd_cases').updateMany({ assigned_to: id }, { $set: { assigned_to: null } });
+  for (const f of ['assigned_to', 'escalated_to', 'created_by']) await col('screening_cases').updateMany({ [f]: id }, { $set: { [f]: null } });
+  await col('users').deleteOne({ id });
   res.json({ ok: true });
 });
 
@@ -217,7 +238,7 @@ app.post('/api/edd/preview', auth, upload.single('file'), (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.post('/api/edd/upload', auth, upload.single('file'), (req, res) => {
+app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const { dateFrom, dateTo, defaultBu = 'DSO' } = req.body;
   if (!dateFrom || !dateTo) return res.status(400).json({ error: 'Date range is required' });
@@ -228,9 +249,9 @@ app.post('/api/edd/upload', auth, upload.single('file'), (req, res) => {
   try { parsed = parseFile(req.file.buffer); } catch (e) { return res.status(400).json({ error: e.message }); }
   const { system, tpl, rows } = parsed;
 
-  const users = db.prepare('SELECT * FROM users').all().map(publicUser);
+  const users = (await col('users').find().toArray()).map(publicUser);
   const active = users.filter((u) => u.status === 'active');
-  const load = Object.fromEntries(db.prepare('SELECT assigned_to, COUNT(*) c FROM edd_cases WHERE edd_status IS NULL GROUP BY assigned_to').all().map((r) => [r.assigned_to, r.c]));
+  const load = await openLoad();
   const isAdmin = req.user.role === 'admin';
 
   const pickAssignee = (r) => {
@@ -246,165 +267,191 @@ app.post('/api/edd/upload', auth, upload.single('file'), (req, res) => {
   const S = { system, total: rows.length, outOfRange: 0, noDate: 0, unmapped: 0, unmappedTypes: {}, dupInFile: 0, notYours: 0,
     newCases: 0, resubmitted: 0, history: 0, alreadyOpen: 0, alreadyApproved: 0, unassigned: 0, perUser: {} };
   const seen = new Set();
-  const findCase = db.prepare('SELECT * FROM edd_cases WHERE bu=? AND request_no=?');
 
-  const tx = db.transaction(() => {
-    const up = db.prepare('INSERT INTO uploads (filename,system,uploaded_by,date_from,date_to) VALUES (?,?,?,?,?)')
-      .run(req.file.originalname, system, req.user.id, dateFrom, dateTo);
-    const uploadId = up.lastInsertRowid;
-    const ins = db.prepare(`INSERT INTO edd_cases (upload_id,system,bu,request_no,company,created_date,record_type,app_type,owner_name,assigned_to,edd_status,status_at,is_history,closed_date,data)
-      VALUES (@upload_id,@system,@bu,@request_no,@company,@created_date,@record_type,@app_type,@owner_name,@assigned_to,@edd_status,@status_at,@is_history,@closed_date,@data)`);
+  const uploadId = await insert('uploads', { filename: req.file.originalname, system, uploaded_by: req.user.id, date_from: dateFrom, date_to: dateTo,
+    stats: null, created_at: now() });
 
-    for (const raw of rows) {
-      const r = normaliseRow(system, tpl, raw, defaultBu);
-      if (!r.created_date) { S.noDate++; continue; }
-      if (r.created_date < dateFrom || r.created_date > dateTo) { S.outOfRange++; continue; }
-      if (!r.app_type) { S.unmapped++; S.unmappedTypes[r.record_type || '(blank)'] = (S.unmappedTypes[r.record_type || '(blank)'] || 0) + 1; continue; }
-      const key = `${r.bu}|${r.request_no}`;
-      if (seen.has(key)) { S.dupInFile++; continue; }
-      seen.add(key);
+  for (const raw of rows) {
+    const r = normaliseRow(system, tpl, raw, defaultBu);
+    if (!r.created_date) { S.noDate++; continue; }
+    if (r.created_date < dateFrom || r.created_date > dateTo) { S.outOfRange++; continue; }
+    if (!r.app_type) { S.unmapped++; S.unmappedTypes[r.record_type || '(blank)'] = (S.unmappedTypes[r.record_type || '(blank)'] || 0) + 1; continue; }
+    const key = `${r.bu}|${r.request_no}`;
+    if (seen.has(key)) { S.dupInFile++; continue; }
+    seen.add(key);
 
-      const existing = findCase.get(r.bu, r.request_no);
-      if (existing) {
-        if (existing.edd_status === 'Approved') { S.alreadyApproved++; continue; }
-        if (r.completed) { // closed in Salesforce -> history
-          db.prepare("UPDATE edd_cases SET edd_status='Approved', is_history=1, closed_date=?, status_at=datetime('now'), updated_at=datetime('now') WHERE id=?").run(r.closed_date, existing.id);
-          logEvent(existing.id, 'history', 'Marked completed by Salesforce export', req.user.id);
-          S.history++; continue;
-        }
-        if (existing.edd_status === null) { S.alreadyOpen++; continue; }
-        if (!isAdmin && existing.assigned_to !== req.user.id) { S.notYours++; continue; }
-        // Requested / Returned -> client has submitted the form: back to work queue
-        db.prepare(`UPDATE edd_cases SET edd_status=NULL, resubmission_count=resubmission_count+1, resubmitted_at=datetime('now'),
-          updated_at=datetime('now'), data=? WHERE id=?`).run(JSON.stringify(r.data), existing.id);
-        logEvent(existing.id, 'resubmitted', `Previously "${existing.edd_status}"`, req.user.id);
-        S.resubmitted++;
-        const who = users.find((u) => u.id === existing.assigned_to);
-        if (who) S.perUser[who.name] = (S.perUser[who.name] || 0) + 1;
-        continue;
+    const existing = await col('edd_cases').findOne({ bu: r.bu, request_no: r.request_no });
+    if (existing) {
+      if (existing.edd_status === 'Approved') { S.alreadyApproved++; continue; }
+      if (r.completed) { // closed in Salesforce -> history
+        await col('edd_cases').updateOne({ id: existing.id }, { $set: { edd_status: 'Approved', is_history: 1, closed_date: r.closed_date, status_at: now(), updated_at: now() } });
+        await logEvent(existing.id, 'history', 'Marked completed by Salesforce export', req.user.id);
+        S.history++; continue;
       }
-
-      // New case
-      let assignee = r.completed ? findOwner(users, r.owner_name) : pickAssignee(r);
-      if (!isAdmin && !r.completed) {
-        if (!(assignee?.id === req.user.id || (req.user.duties.includes(r.app_type) && req.user.bus.includes(r.bu)))) { S.notYours++; continue; }
-        assignee = req.user;
-      }
-      const id = ins.run({
-        upload_id: uploadId, system, bu: r.bu, request_no: r.request_no, company: r.company, created_date: r.created_date,
-        record_type: r.record_type, app_type: r.app_type, owner_name: r.owner_name, assigned_to: assignee?.id ?? null,
-        edd_status: r.completed ? 'Approved' : null, status_at: r.completed ? new Date().toISOString() : null,
-        is_history: r.completed ? 1 : 0, closed_date: r.closed_date, data: JSON.stringify(r.data),
-      }).lastInsertRowid;
-      logEvent(id, r.completed ? 'history' : 'created', r.completed ? 'Imported as completed (history)' : `Imported from ${system}`, req.user.id, null, assignee?.id ?? null);
-      if (r.completed) { S.history++; continue; }
-      S.newCases++;
-      if (assignee) S.perUser[assignee.name] = (S.perUser[assignee.name] || 0) + 1; else S.unassigned++;
+      if (existing.edd_status == null) { S.alreadyOpen++; continue; }
+      if (!isAdmin && existing.assigned_to !== req.user.id) { S.notYours++; continue; }
+      // Requested / Returned -> client has submitted the form: back to work queue
+      await col('edd_cases').updateOne({ id: existing.id }, { $set: { edd_status: null, resubmitted_at: now(), updated_at: now(), data: r.data },
+        $inc: { resubmission_count: 1 } });
+      await logEvent(existing.id, 'resubmitted', `Previously "${existing.edd_status}"`, req.user.id);
+      S.resubmitted++;
+      const who = users.find((u) => u.id === existing.assigned_to);
+      if (who) S.perUser[who.name] = (S.perUser[who.name] || 0) + 1;
+      continue;
     }
-    db.prepare('UPDATE uploads SET stats=? WHERE id=?').run(JSON.stringify(S), uploadId);
-  });
-  tx();
+
+    // New case
+    let assignee = r.completed ? findOwner(users, r.owner_name) : pickAssignee(r);
+    if (!isAdmin && !r.completed) {
+      if (!(assignee?.id === req.user.id || (req.user.duties.includes(r.app_type) && req.user.bus.includes(r.bu)))) { S.notYours++; continue; }
+      assignee = req.user;
+    }
+    const id = await insert('edd_cases', {
+      upload_id: uploadId, system, bu: r.bu, request_no: r.request_no, company: r.company, created_date: r.created_date,
+      record_type: r.record_type, app_type: r.app_type, owner_name: r.owner_name, assigned_to: assignee?.id ?? null,
+      risk_rating: null, root_causes: [], edd_status: r.completed ? 'Approved' : null, status_at: r.completed ? new Date().toISOString() : null,
+      resubmission_count: 0, resubmitted_at: null, is_history: r.completed ? 1 : 0, closed_date: r.closed_date, data: r.data,
+      created_at: now(), updated_at: now(),
+    });
+    await logEvent(id, r.completed ? 'history' : 'created', r.completed ? 'Imported as completed (history)' : `Imported from ${system}`, req.user.id, null, assignee?.id ?? null);
+    if (r.completed) { S.history++; continue; }
+    S.newCases++;
+    if (assignee) S.perUser[assignee.name] = (S.perUser[assignee.name] || 0) + 1; else S.unassigned++;
+  }
+  await col('uploads').updateOne({ id: uploadId }, { $set: { stats: S } });
   res.json(S);
 });
 
-app.get('/api/edd/uploads', auth, (req, res) => {
-  const where = req.user.role === 'admin' ? '' : 'WHERE u.uploaded_by=' + req.user.id;
-  res.json(db.prepare(`SELECT u.*, us.name uploaded_by_name FROM uploads u LEFT JOIN users us ON us.id=u.uploaded_by ${where} ORDER BY u.id DESC LIMIT 30`).all()
-    .map((u) => ({ ...u, stats: J(u.stats, {}) })));
+app.get('/api/edd/uploads', auth, async (req, res) => {
+  const filter = req.user.role === 'admin' ? {} : { uploaded_by: req.user.id };
+  const [ups, U] = await Promise.all([col('uploads').find(filter).sort({ id: -1 }).limit(30).toArray(), usersById()]);
+  res.json(ups.map((u) => ({ ...strip(u), uploaded_by_name: U[u.uploaded_by]?.name ?? null, stats: J(u.stats, {}) })));
 });
 
 /* ================= EDD cases ================= */
-const SELECT = `SELECT c.*, u.name assigned_name,
-  (SELECT COUNT(*) FROM case_remarks r WHERE r.case_id=c.id) remark_count
-  FROM edd_cases c LEFT JOIN users u ON u.id=c.assigned_to`;
-const mapCase = (c) => ({ ...c, data: J(c.data, {}), root_causes: J(c.root_causes), is_new: c.resubmission_count === 0 });
-
-function query(q, where = [], p = []) {
-  where = [...where]; p = [...p];
-  if (q.tab === 'work') where.push('c.edd_status IS NULL');
-  if (q.tab === 'awaiting') where.push("c.edd_status IN ('Requested','Returned for reupload')");
-  if (q.tab === 'approved') where.push("c.edd_status='Approved'");
-  if (q.view === 'lr') where.push("c.app_type='License Renewal'");
-  if (q.view === 'other') where.push("c.app_type!='License Renewal'");
-  if (q.bu) { where.push('c.bu=?'); p.push(q.bu); }
-  if (q.app_type) { where.push('c.app_type=?'); p.push(q.app_type); }
-  if (q.status) { if (q.status === 'Open') where.push('c.edd_status IS NULL'); else { where.push('c.edd_status=?'); p.push(q.status); } }
-  if (q.risk) { where.push('c.risk_rating=?'); p.push(q.risk); }
-  if (q.assignee) { if (q.assignee === 'unassigned') where.push('c.assigned_to IS NULL'); else { where.push('c.assigned_to=?'); p.push(+q.assignee); } }
-  if (q.from) { where.push('c.created_date>=?'); p.push(q.from); }
-  if (q.to) { where.push('c.created_date<=?'); p.push(q.to); }
-  if (q.search) { const s = `%${q.search}%`; where.push('(c.request_no LIKE ? OR c.company LIKE ? OR c.record_type LIKE ? OR u.name LIKE ?)'); p.push(s, s, s, s); }
-  return db.prepare(`${SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY c.resubmitted_at IS NULL, c.resubmitted_at DESC, c.created_date DESC, c.id DESC`).all(...p).map(mapCase);
+/** case as the API returns it: assignee name, remark count, parsed fields */
+async function hydrateEdd(cases) {
+  const ids = cases.map((c) => c.id);
+  const [U, rc] = await Promise.all([usersById(),
+    col('case_remarks').aggregate([{ $match: { case_id: { $in: ids } } }, { $group: { _id: '$case_id', n: { $sum: 1 } } }]).toArray()]);
+  const R = Object.fromEntries(rc.map((r) => [r._id, r.n]));
+  return cases.map((c) => ({ ...strip(c), assigned_name: U[c.assigned_to]?.name ?? null, remark_count: R[c.id] || 0,
+    data: J(c.data, {}), root_causes: J(c.root_causes), is_new: (c.resubmission_count || 0) === 0 }));
 }
 
-app.get('/api/edd/my-cases', auth, (req, res) => {
-  const scope = req.user.role === 'admin' ? req.query.scope : 'mine';
-  if (scope === 'all') return res.json(query(req.query));
-  if (scope === 'unassigned') return res.json(query({ ...req.query, assignee: 'unassigned' }));
-  res.json(query(req.query, ['c.assigned_to=?'], [req.user.id]));
-});
-app.get('/api/edd/master', auth, (req, res) => res.json(query(req.query)));
+async function query(q, base = {}) {
+  const f = { ...base };
+  const and = [];
+  if (q.tab === 'work') f.edd_status = null;
+  if (q.tab === 'awaiting') f.edd_status = { $in: ['Requested', 'Returned for reupload'] };
+  if (q.tab === 'approved') f.edd_status = 'Approved';
+  if (q.view === 'lr') f.app_type = 'License Renewal';
+  if (q.view === 'other') and.push({ app_type: { $ne: 'License Renewal' } });
+  if (q.bu) f.bu = q.bu;
+  if (q.app_type) and.push({ app_type: q.app_type });
+  if (q.status) f.edd_status = q.status === 'Open' ? null : q.status;
+  if (q.risk) f.risk_rating = q.risk;
+  if (q.assignee) f.assigned_to = q.assignee === 'unassigned' ? null : +q.assignee;
+  if (q.from || q.to) f.created_date = { ...(q.from ? { $gte: q.from } : {}), ...(q.to ? { $lte: q.to } : {}) };
+  if (q.search) {
+    const r = rx(q.search);
+    const who = (await col('users').find({ name: r }, { projection: { id: 1 } }).toArray()).map((u) => u.id);
+    and.push({ $or: [{ request_no: r }, { company: r }, { record_type: r }, ...(who.length ? [{ assigned_to: { $in: who } }] : [])] });
+  }
+  if (and.length) f.$and = and;
+  const cases = await col('edd_cases').find(f).toArray();
+  // resubmitted first (newest), then newest created
+  cases.sort((a, b) => (a.resubmitted_at == null) - (b.resubmitted_at == null)
+    || String(b.resubmitted_at || '').localeCompare(String(a.resubmitted_at || ''))
+    || String(b.created_date || '').localeCompare(String(a.created_date || '')) || b.id - a.id);
+  return hydrateEdd(cases);
+}
 
-app.get('/api/edd/counts', auth, (req, res) => {
+app.get('/api/edd/my-cases', auth, async (req, res) => {
   const scope = req.user.role === 'admin' ? req.query.scope : 'mine';
-  const w = scope === 'all' ? '1=1' : scope === 'unassigned' ? 'assigned_to IS NULL' : `assigned_to=${req.user.id}`;
-  const row = db.prepare(`SELECT
-    SUM(edd_status IS NULL AND app_type='License Renewal') work_lr,
-    SUM(edd_status IS NULL AND app_type!='License Renewal') work_other,
-    SUM(edd_status IN ('Requested','Returned for reupload') AND app_type='License Renewal') awaiting_lr,
-    SUM(edd_status IN ('Requested','Returned for reupload') AND app_type!='License Renewal') awaiting_other,
-    SUM(edd_status='Approved' AND app_type='License Renewal') approved_lr,
-    SUM(edd_status='Approved' AND app_type!='License Renewal') approved_other,
-    SUM(edd_status IS NULL AND resubmission_count>0) resubmitted,
-    SUM(edd_status IS NULL AND resubmission_count=0) new_apps
-    FROM edd_cases WHERE ${w}`).get();
-  const all = db.prepare(`SELECT COUNT(*) total, SUM(assigned_to IS NULL AND edd_status IS NULL) unassigned FROM edd_cases`).get();
-  res.json({ ...Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v || 0])), total: all.total, unassigned: all.unassigned || 0 });
+  if (scope === 'all') return res.json(await query(req.query));
+  if (scope === 'unassigned') return res.json(await query({ ...req.query, assignee: 'unassigned' }));
+  res.json(await query({ ...req.query, assignee: undefined }, { assigned_to: req.user.id }));
+});
+app.get('/api/edd/master', auth, async (req, res) => res.json(await query(req.query)));
+
+app.get('/api/edd/counts', auth, async (req, res) => {
+  const scope = req.user.role === 'admin' ? req.query.scope : 'mine';
+  const f = scope === 'all' ? {} : scope === 'unassigned' ? { assigned_to: null } : { assigned_to: req.user.id };
+  const proj = { projection: { edd_status: 1, app_type: 1, resubmission_count: 1, assigned_to: 1 } };
+  const [rows, all] = await Promise.all([col('edd_cases').find(f, proj).toArray(), col('edd_cases').find({}, proj).toArray()]);
+  const LR = (c) => c.app_type === 'License Renewal';
+  const open = (c) => c.edd_status == null;
+  const awaiting = (c) => ['Requested', 'Returned for reupload'].includes(c.edd_status);
+  const n = (fn) => rows.filter(fn).length;
+  res.json({
+    work_lr: n((c) => open(c) && LR(c)), work_other: n((c) => open(c) && !LR(c)),
+    awaiting_lr: n((c) => awaiting(c) && LR(c)), awaiting_other: n((c) => awaiting(c) && !LR(c)),
+    approved_lr: n((c) => c.edd_status === 'Approved' && LR(c)), approved_other: n((c) => c.edd_status === 'Approved' && !LR(c)),
+    resubmitted: n((c) => open(c) && c.resubmission_count > 0), new_apps: n((c) => open(c) && !(c.resubmission_count > 0)),
+    total: all.length, unassigned: all.filter((c) => c.assigned_to == null && open(c)).length,
+  });
 });
 
 /* admin overview: workload per officer (EDD + screening cases) */
-app.get('/api/edd/team', auth, adminOnly, (req, res) => {
-  const edd = db.prepare(`SELECT assigned_to uid,
-    SUM(edd_status IS NULL) open, SUM(edd_status IS NULL AND resubmission_count=0) new_apps,
-    SUM(edd_status IS NULL AND resubmission_count>0) resubmitted,
-    SUM(edd_status IS NULL AND app_type='License Renewal') open_lr,
-    SUM(edd_status IN ('Requested','Returned for reupload')) awaiting,
-    SUM(edd_status='Requested') requested, SUM(edd_status='Returned for reupload') returned,
-    SUM(edd_status='Approved') approved,
-    SUM(edd_status IS NOT 'Approved' AND risk_rating='High') high_risk,
-    MIN(CASE WHEN edd_status IS NULL THEN created_date END) oldest_open,
-    COUNT(*) total
-    FROM edd_cases WHERE assigned_to IS NOT NULL GROUP BY assigned_to`).all();
-  // approvals recorded in the app in the last 30 days (imported history is not counted)
-  const recent = db.prepare(`SELECT c.assigned_to uid, COUNT(DISTINCT e.case_id) n FROM case_events e JOIN edd_cases c ON c.id=e.case_id
-    WHERE e.type='status' AND e.detail LIKE '%→ Approved' AND e.at >= datetime('now','-30 days') GROUP BY c.assigned_to`).all();
-  const scr = db.prepare(`SELECT assigned_to uid, SUM(status!='False') cases_active,
-    SUM(status IN (?, ?)) cases_pending FROM screening_cases WHERE assigned_to IS NOT NULL GROUP BY assigned_to`).all(T.POSSIBLE, T.ESCALATE);
+app.get('/api/edd/team', auth, adminOnly, async (req, res) => {
+  const cutoff = new Date(Date.now() - 30 * 864e5).toISOString().replace('T', ' ').slice(0, 19);
+  const [edd, approvals, scr, escs, lastA, lastB, users] = await Promise.all([
+    col('edd_cases').find({ assigned_to: { $ne: null } }, { projection: { id: 1, assigned_to: 1, edd_status: 1, resubmission_count: 1, app_type: 1, risk_rating: 1, created_date: 1 } }).toArray(),
+    // approvals recorded in the app in the last 30 days (imported history is not counted)
+    col('case_events').find({ type: 'status', detail: /→ Approved$/, at: { $gte: cutoff } }, { projection: { case_id: 1 } }).toArray(),
+    col('screening_cases').find({}, { projection: { id: 1, assigned_to: 1, escalated_to: 1, status: 1 } }).toArray(),
+    col('screening_case_escalations').find({ decided_at: null, manager_at: { $ne: null } }, { projection: { case_id: 1 } }).toArray(),
+    col('case_events').aggregate([{ $match: { by_user: { $ne: null } } }, { $group: { _id: '$by_user', at: { $max: '$at' } } }]).toArray(),
+    col('screening_case_events').aggregate([{ $match: { by_user: { $ne: null } } }, { $group: { _id: '$by_user', at: { $max: '$at' } } }]).toArray(),
+    col('users').find().sort({ role: -1, name: 1 }).toArray(),
+  ]);
+  const zero = () => ({ open: 0, new_apps: 0, resubmitted: 0, open_lr: 0, awaiting: 0, requested: 0, returned: 0, approved: 0, high_risk: 0, oldest_open: null, total: 0 });
+  const E = {};
+  for (const c of edd) {
+    const e = (E[c.assigned_to] ??= zero());
+    const open = c.edd_status == null;
+    e.total++;
+    if (open) {
+      e.open++; if (c.resubmission_count > 0) e.resubmitted++; else e.new_apps++;
+      if (c.app_type === 'License Renewal') e.open_lr++;
+      if (c.created_date && (!e.oldest_open || c.created_date < e.oldest_open)) e.oldest_open = c.created_date;
+    }
+    if (c.edd_status === 'Requested') { e.requested++; e.awaiting++; }
+    if (c.edd_status === 'Returned for reupload') { e.returned++; e.awaiting++; }
+    if (c.edd_status === 'Approved') e.approved++;
+    if (c.edd_status !== 'Approved' && c.risk_rating === 'High') e.high_risk++;
+  }
+  const owner = Object.fromEntries(edd.map((c) => [c.id, c.assigned_to]));
+  const R = {};
+  for (const id of new Set(approvals.map((a) => a.case_id))) if (owner[id] != null) R[owner[id]] = (R[owner[id]] || 0) + 1;
+  const S = {};
+  for (const c of scr) {
+    if (c.assigned_to == null) continue;
+    const s = (S[c.assigned_to] ??= { cases_active: 0, cases_pending: 0 });
+    if (c.status !== 'False') s.cases_active++;
+    if ([T.POSSIBLE, T.ESCALATE].includes(c.status)) s.cases_pending++;
+  }
   // escalated cases waiting for this manager's recommendation
-  const escw = db.prepare(`SELECT c.escalated_to uid, COUNT(*) n FROM screening_cases c WHERE c.status=? AND c.escalated_to IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM screening_case_escalations e WHERE e.case_id=c.id AND e.decided_at IS NULL AND e.manager_at IS NOT NULL)
-    GROUP BY c.escalated_to`).all(T.ESCALATE);
-  const last = db.prepare(`SELECT by_user uid, MAX(at) at FROM (
-    SELECT by_user, at FROM case_events UNION ALL SELECT by_user, at FROM screening_case_events) WHERE by_user IS NOT NULL GROUP BY by_user`).all();
-  const by = (rows) => Object.fromEntries(rows.map((r) => [r.uid, r]));
-  const E = by(edd), S = by(scr), L = by(last), R = by(recent), W = by(escw);
-  const zero = { open: 0, new_apps: 0, resubmitted: 0, open_lr: 0, awaiting: 0, requested: 0, returned: 0, approved: 0, high_risk: 0, oldest_open: null, total: 0 };
-  const users = db.prepare('SELECT * FROM users ORDER BY role DESC, name').all().map(publicUser)
+  const recommended = new Set(escs.map((e) => e.case_id));
+  const W = {};
+  for (const c of scr) if (c.status === T.ESCALATE && c.escalated_to != null && !recommended.has(c.id)) W[c.escalated_to] = (W[c.escalated_to] || 0) + 1;
+  const L = {};
+  for (const r of [...lastA, ...lastB]) if (!L[r._id] || r.at > L[r._id]) L[r._id] = r.at;
+
+  res.json(users.map(publicUser)
     // officers and assistant managers always; other admins only when they hold cases
-    .filter((u) => u.role === 'user' || /assistant manager/i.test(u.title || '') || E[u.id] || S[u.id]);
-  res.json(users.map((u) => {
-    const { uid, ...e } = E[u.id] || zero;
-    return {
+    .filter((u) => u.role === 'user' || /assistant manager/i.test(u.title || '') || E[u.id] || S[u.id])
+    .map((u) => ({
       id: u.id, name: u.name, title: u.title, role: u.role, status: u.status, bus: u.bus, duties: u.duties,
-      ...Object.fromEntries(Object.entries({ ...zero, ...e }).map(([k, v]) => [k, k === 'oldest_open' ? v : v || 0])),
-      approved_30d: R[u.id]?.n || 0, cases_active: S[u.id]?.cases_active || 0, cases_pending: S[u.id]?.cases_pending || 0,
-      escalations_waiting: W[u.id]?.n || 0, last_activity: L[u.id]?.at || null,
-    };
-  }));
+      ...(E[u.id] || zero()),
+      approved_30d: R[u.id] || 0, cases_active: S[u.id]?.cases_active || 0, cases_pending: S[u.id]?.cases_pending || 0,
+      escalations_waiting: W[u.id] || 0, last_activity: L[u.id] || null,
+    })));
 });
 
-app.patch('/api/edd/cases/:id', auth, (req, res) => {
-  const c = db.prepare('SELECT * FROM edd_cases WHERE id=?').get(+req.params.id);
+app.patch('/api/edd/cases/:id', auth, async (req, res) => {
+  const c = await col('edd_cases').findOne({ id: +req.params.id });
   if (!c) return res.status(404).json({ error: 'Case not found' });
   if (req.user.role !== 'admin' && c.assigned_to !== req.user.id) return res.status(403).json({ error: 'Not your case' });
   const b = req.body || {};
@@ -413,68 +460,73 @@ app.patch('/api/edd/cases/:id', auth, (req, res) => {
   if (risk && !T.RISK_RATINGS.includes(risk)) return res.status(400).json({ error: 'Invalid risk rating' });
   if (!Array.isArray(roots) || roots.some((r) => !T.ROOT_CAUSES.includes(r))) return res.status(400).json({ error: 'Invalid root cause' });
 
-  let status = c.edd_status;
+  let status = c.edd_status ?? null;
   if ('edd_status' in b) {
     status = b.edd_status || null;
     if (status && !T.EDD_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid EDD status' });
-    if (status && c.resubmission_count === 0 && (!risk || !roots.length))
+    if (status && (c.resubmission_count || 0) === 0 && (!risk || !roots.length))
       return res.status(400).json({ error: 'New application: set Risk Rating and Root Cause before changing the EDD Status' });
   }
-  db.prepare(`UPDATE edd_cases SET risk_rating=?, root_causes=?, edd_status=?, status_at=CASE WHEN ? THEN datetime('now') ELSE status_at END,
-    updated_at=datetime('now') WHERE id=?`).run(risk, JSON.stringify(roots), status, status !== c.edd_status ? 1 : 0, c.id);
-  if (status !== c.edd_status) logEvent(c.id, 'status', `${c.edd_status || 'Open'} → ${status || 'Open'}`, req.user.id);
-  res.json(mapCase(db.prepare(`${SELECT} WHERE c.id=?`).get(c.id)));
+  const changed = status !== (c.edd_status ?? null);
+  await col('edd_cases').updateOne({ id: c.id }, { $set: { risk_rating: risk, root_causes: roots, edd_status: status, updated_at: now(),
+    ...(changed ? { status_at: now() } : {}) } });
+  if (changed) await logEvent(c.id, 'status', `${c.edd_status || 'Open'} → ${status || 'Open'}`, req.user.id);
+  res.json((await hydrateEdd([await col('edd_cases').findOne({ id: c.id })]))[0]);
 });
 
-app.post('/api/edd/cases/transfer', auth, (req, res) => {
+app.post('/api/edd/cases/transfer', auth, async (req, res) => {
   const { caseIds, toUserId, reason } = req.body || {};
   if (!Array.isArray(caseIds) || !caseIds.length) return res.status(400).json({ error: 'No cases selected' });
-  const target = getUser(+toUserId);
+  const target = await getUser(+toUserId);
   if (!target) return res.status(400).json({ error: 'Target user not found' });
   if (target.status !== 'active') return res.status(400).json({ error: 'Target user is on leave' });
-  const tx = db.transaction(() => {
-    let n = 0;
-    for (const id of caseIds) {
-      const c = db.prepare('SELECT * FROM edd_cases WHERE id=?').get(+id);
-      if (!c || c.assigned_to === target.id) continue;
-      if (req.user.role !== 'admin' && c.assigned_to !== req.user.id) throw new Error(`Case ${c.request_no} is not yours`);
-      db.prepare("UPDATE edd_cases SET assigned_to=?, updated_at=datetime('now') WHERE id=?").run(target.id, c.id);
-      logEvent(c.id, 'transfer', reason || '', req.user.id, c.assigned_to, target.id);
-      n++;
-    }
-    return n;
-  });
-  try { res.json({ transferred: tx() }); } catch (e) { res.status(403).json({ error: e.message }); }
+  const list = await col('edd_cases').find({ id: { $in: caseIds.map(Number) } }).toArray();
+  // check every case first, so nothing moves if one is not allowed
+  const bad = req.user.role !== 'admin' && list.find((c) => c.assigned_to !== target.id && c.assigned_to !== req.user.id);
+  if (bad) return res.status(403).json({ error: `Case ${bad.request_no} is not yours` });
+  let n = 0;
+  for (const c of list) {
+    if (c.assigned_to === target.id) continue;
+    await col('edd_cases').updateOne({ id: c.id }, { $set: { assigned_to: target.id, updated_at: now() } });
+    await logEvent(c.id, 'transfer', reason || '', req.user.id, c.assigned_to ?? null, target.id);
+    n++;
+  }
+  res.json({ transferred: n });
 });
 
-app.get('/api/edd/cases/:id/history', auth, (req, res) => {
-  res.json(db.prepare(`SELECT e.*, f.name from_name, t.name to_name, b.name by_name FROM case_events e
-    LEFT JOIN users f ON f.id=e.from_user LEFT JOIN users t ON t.id=e.to_user LEFT JOIN users b ON b.id=e.by_user
-    WHERE e.case_id=? ORDER BY e.id DESC`).all(+req.params.id));
-});
+/** activity rows with the names of the people involved */
+export async function historyOf(collection, caseId) {
+  const [events, U] = await Promise.all([col(collection).find({ case_id: caseId }).sort({ id: -1 }).toArray(), usersById()]);
+  return events.map((e) => ({ ...strip(e), from_name: U[e.from_user]?.name ?? null, to_name: U[e.to_user]?.name ?? null, by_name: U[e.by_user]?.name ?? null }));
+}
+/** remarks with author details, oldest first */
+export async function remarksOf(collection, caseId) {
+  const [rows, U] = await Promise.all([col(collection).find({ case_id: caseId }).sort({ id: 1 }).toArray(), usersById()]);
+  return rows.map((r) => ({ id: r.id, case_id: r.case_id, body: r.body, created_at: r.created_at, user_id: r.user_id,
+    user_name: U[r.user_id]?.name ?? null, user_role: U[r.user_id]?.role ?? null, user_title: U[r.user_id]?.title ?? null }));
+}
+
+app.get('/api/edd/cases/:id/history', auth, async (req, res) => res.json(await historyOf('case_events', +req.params.id)));
 
 /* ---------- remarks (officer/admin communication per case; append-only) ---------- */
 const REMARK_MAX = 4000;
-const listRemarks = (caseId) => db.prepare(`SELECT r.id, r.case_id, r.body, r.created_at, r.user_id, u.name user_name, u.role user_role, u.title user_title
-  FROM case_remarks r LEFT JOIN users u ON u.id=r.user_id WHERE r.case_id=? ORDER BY r.id`).all(caseId);
-
-app.get('/api/edd/cases/:id/remarks', auth, (req, res) => {
-  if (!db.prepare('SELECT 1 FROM edd_cases WHERE id=?').get(+req.params.id)) return res.status(404).json({ error: 'Case not found' });
-  res.json(listRemarks(+req.params.id));
+app.get('/api/edd/cases/:id/remarks', auth, async (req, res) => {
+  if (!(await col('edd_cases').findOne({ id: +req.params.id }, { projection: { id: 1 } }))) return res.status(404).json({ error: 'Case not found' });
+  res.json(await remarksOf('case_remarks', +req.params.id));
 });
 
-app.post('/api/edd/cases/:id/remarks', auth, (req, res) => {
-  const c = db.prepare('SELECT id FROM edd_cases WHERE id=?').get(+req.params.id);
+app.post('/api/edd/cases/:id/remarks', auth, async (req, res) => {
+  const c = await col('edd_cases').findOne({ id: +req.params.id }, { projection: { id: 1 } });
   if (!c) return res.status(404).json({ error: 'Case not found' });
   const body = String(req.body?.body ?? '').trim();
   if (!body) return res.status(400).json({ error: 'Remark cannot be empty' });
   if (body.length > REMARK_MAX) return res.status(400).json({ error: `Remark is too long (max ${REMARK_MAX} characters)` });
-  db.prepare('INSERT INTO case_remarks (case_id,user_id,body) VALUES (?,?,?)').run(c.id, req.user.id, body);
-  db.prepare("UPDATE edd_cases SET updated_at=datetime('now') WHERE id=?").run(c.id);
-  res.status(201).json(listRemarks(c.id));
+  await insert('case_remarks', { case_id: c.id, user_id: req.user.id, body, created_at: now() });
+  await col('edd_cases').updateOne({ id: c.id }, { $set: { updated_at: now() } });
+  res.status(201).json(await remarksOf('case_remarks', c.id));
 });
 
-registerCaseRoutes(app,{ auth, adminOnly, upload, publicUser, findOwner });
+registerCaseRoutes(app, { auth, adminOnly, upload, publicUser, findOwner, usersById, historyOf, remarksOf, rx });
 
 // Production: serve the built website (client/dist) from the same server, so /api works on the same domain.
 const CLIENT_DIST = fileURLToPath(new URL('../client/dist', import.meta.url));
@@ -485,4 +537,11 @@ if (existsSync(CLIENT_DIST)) {
   app.get('*', (req, res) => res.sendFile(`${CLIENT_DIST}/index.html`));
 }
 
-app.listen(PORT,() => console.log(`EDD API running on http://localhost:${PORT}`));
+// unexpected errors: log them, answer with JSON
+app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
+  console.error(err);
+  res.status(500).json({ error: 'Something went wrong. Please try again.' });
+});
+
+await connectDb();
+app.listen(PORT, () => console.log(`EDD API running on http://localhost:${PORT}`));
