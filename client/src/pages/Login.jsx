@@ -96,13 +96,13 @@ export default function Login() {
             >
               {busy ? "Signing in…" : "Sign in"}
             </button>
-            <p
+            {/* <p
               className="muted"
               style={{ fontSize: 12, textAlign: "center", margin: 0 }}
             >
               Admin: admin@edd.local / admin123 · Team: firstname@edd.local /
               Welcome@123
-            </p>
+            </p> */}
           </div>
         </form>
       </section>
