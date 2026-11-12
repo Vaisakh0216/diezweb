@@ -1,10 +1,13 @@
 {
   "name": "diez-aml",
   "private": true,
+  "type": "module",
   "description": "DIEZ Anti-Money Laundering: EDD and case management (React client + Express/SQLite server)",
+  "main": "server.js",
   "scripts": {
+    "postinstall": "npm run build",
     "build": "npm --prefix client ci --include=dev && npm --prefix client run build && npm --prefix server ci --omit=dev",
-    "start": "node --env-file-if-exists=server/.env server/index.js"
+    "start": "node --env-file-if-exists=server/.env server.js"
   },
   "engines": { "node": ">=20" }
 }
