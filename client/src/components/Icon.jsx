@@ -12,6 +12,8 @@ const P = {
   monitor: <><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></>,
   grid: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></>,
   chart: <><path d="M4 20h16" /><path d="M7 16v-5M12 16V7M17 16v-8" /></>,
+  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+  close: <path d="M6 6l12 12M18 6L6 18" />,
   logout: <><path d="M15 4h2.5A1.5 1.5 0 0119 5.5v13a1.5 1.5 0 01-1.5 1.5H15" /><path d="M10 16l4-4-4-4M14 12H4" /></>,
 };
 

@@ -98,6 +98,19 @@ const Sub = ({ to, id, children, end }) => (
 export default function Layout() {
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
+  // phones / tablets: the menu is a slide-out drawer opened from the top bar
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [pathname]);
+  useEffect(() => {
+    if (!navOpen) return;
+    const k = (e) => e.key === "Escape" && setNavOpen(false);
+    document.addEventListener("keydown", k);
+    document.body.classList.add("nav-locked");
+    return () => {
+      document.removeEventListener("keydown", k);
+      document.body.classList.remove("nav-locked");
+    };
+  }, [navOpen]);
   const inEdd = pathname.startsWith("/edd");
   const inCases = pathname.startsWith("/cases");
   const inReports = pathname.startsWith("/reports");
@@ -143,8 +156,42 @@ export default function Layout() {
     ) : null;
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
+    <div className={`shell ${navOpen ? "nav-open" : ""}`}>
+      <header className="topbar">
+        <button
+          type="button"
+          className="btn btn-ghost icon-btn topbar-menu"
+          id="btn-menu"
+          onClick={() => setNavOpen(true)}
+          aria-label="Open menu"
+          aria-expanded={navOpen}
+          aria-controls="sidebar"
+        >
+          <Icon name="menu" />
+        </button>
+        <div className="brand topbar-brand">
+          <div className="brand-logo">{ORG.initial}</div>
+          <div>
+            <h2>{ORG.company}</h2>
+            <small>{ORG.department}</small>
+          </div>
+        </div>
+      </header>
+      <div
+        className="nav-backdrop"
+        onClick={() => setNavOpen(false)}
+        aria-hidden="true"
+      />
+      <aside className="sidebar" id="sidebar">
+        <button
+          type="button"
+          className="btn btn-ghost icon-btn sidebar-close"
+          id="btn-menu-close"
+          onClick={() => setNavOpen(false)}
+          aria-label="Close menu"
+        >
+          <Icon name="close" />
+        </button>
         <div className="brand">
           <div className="brand-logo">{ORG.initial}</div>
           <div>

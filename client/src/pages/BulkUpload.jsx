@@ -72,7 +72,7 @@ export default function BulkUpload() {
       )}
 
       {preview && !result && (
-        <div className="grid" style={{ gridTemplateColumns: 'minmax(280px, 340px) 1fr', alignItems: 'start' }}>
+        <div className="grid grid-upload">
           <div className="card grid">
             <div>
               <div className="muted" style={{ fontSize: 12 }}>Detected system</div>

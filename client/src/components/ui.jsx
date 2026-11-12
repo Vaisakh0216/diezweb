@@ -4,7 +4,8 @@ import React, { useEffect, useRef, useState } from 'react';
 export function Modal({ title, children, onClose, footer, wide, size }) {
   return (
     <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal ${wide ? 'wide' : ''} ${size || ''}`} role="dialog">
+      <div className={`modal ${wide ? 'wide' : ''} ${size || ''}`} role="dialog" aria-modal="true">
+        <button type="button" className="modal-x" onClick={onClose} aria-label="Close">×</button>
         <h3>{title}</h3>
         {children}
         {footer && <div className="modal-foot">{footer}</div>}

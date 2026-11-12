@@ -9,7 +9,7 @@ export default function Glossary() {
       <div className="gloss">
         {meta.glossary.map(([k, v]) => <div key={k} className="card"><b>{k}</b><div style={{ marginTop: 6 }}>{v}</div></div>)}
       </div>
-      <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', marginTop: 24 }}>
+      <div className="grid grid-2" style={{ marginTop: 24 }}>
         <div className="card"><h3 style={{ fontSize: 16, marginBottom: 10 }}>DSO / IFZA / DTEC application types</h3>{meta.dsoTerms.map((t) => <span key={t} className="tag">{t}</span>)}</div>
         <div className="card"><h3 style={{ fontSize: 16, marginBottom: 10 }}>DAFZ / DCC application types</h3>{meta.dafzDccTerms.map((t) => <span key={t} className="tag">{t}</span>)}</div>
         <div className="card"><h3 style={{ fontSize: 16, marginBottom: 10 }}>Root causes</h3>{meta.rootCauses.map((t) => <span key={t} className="tag">{t}</span>)}</div>
