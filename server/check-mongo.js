@@ -2,7 +2,7 @@
 //   npm run check:mongo                      uses MONGODB_URI from server/.env
 //   MONGODB_URI="mongodb+srv://..." npm run check:mongo   test another value (e.g. the one set on Hostinger)
 import { MongoClient } from 'mongodb';
-import { dbNameFrom, explainDbError } from './db.js';
+import { dbNameFrom, explainDbError, prepareDns } from './db.js';
 
 const raw = process.env.MONGODB_URI ?? '';
 const problems = [];
@@ -36,6 +36,7 @@ else {
 console.log('\nConnecting…');
 let client;
 try {
+  await prepareDns(uri);
   client = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 });
   await client.connect();
   await client.db('admin').command({ ping: 1 });

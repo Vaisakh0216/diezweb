@@ -4,6 +4,7 @@
 // Every document keeps a numeric `id` (also used as `_id`), generated from the `counters` collection, so URLs and the
 // API stay exactly as before. Timestamps are UTC strings "YYYY-MM-DD HH:MM:SS".
 import { MongoClient } from 'mongodb';
+import dns from 'node:dns';
 import bcrypt from 'bcryptjs';
 import { TEAM, APP_TYPES, BUS } from './terms.js';
 
@@ -51,15 +52,37 @@ export function explainDbError(e) {
     return 'MONGODB_URI is not a valid connection string: it must look like mongodb+srv://USER:PASSWORD@HOST/… with exactly one "@" (special characters in the password must be URL-encoded).';
   if (/tlsv1 alert|SSL alert number 80|Server selection timed out|ETIMEDOUT/i.test(m))
     return 'MongoDB Atlas refused the connection: add this server to Atlas → Network Access (e.g. 0.0.0.0/0).';
+  if (/querySrv (ECONNREFUSED|ETIMEOUT|ESERVFAIL|EREFUSED)/i.test(m))
+    return 'The DNS server could not look up the MongoDB cluster (SRV record). Set DNS_SERVERS=8.8.8.8,1.1.1.1 or use the standard (non-SRV) connection string from Atlas.';
   if (/ENOTFOUND|querySrv/i.test(m)) return 'MongoDB cluster address not found: check the host in MONGODB_URI.';
   if (/auth|bad auth|Authentication failed/i.test(m)) return 'MongoDB rejected the username/password in MONGODB_URI (Atlas → Database Access).';
   return `MongoDB connection failed: ${m}`;
+}
+
+/**
+ * mongodb+srv:// addresses need a DNS SRV lookup. Some routers / ISPs / hosts refuse those (querySrv ECONNREFUSED).
+ * DNS_SERVERS (comma separated) forces specific DNS servers; otherwise, if the system DNS refuses the lookup,
+ * switch this process to public DNS (Google, Cloudflare).
+ */
+export async function prepareDns(uri) {
+  const forced = String(process.env.DNS_SERVERS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (forced.length) { dns.setServers(forced); console.log(`DNS: using ${forced.join(', ')} (DNS_SERVERS)`); return; }
+  const m = String(uri || '').match(/^mongodb\+srv:\/\/(?:[^@/]*@)?([^/?,]+)/);
+  if (!m) return;
+  try { await dns.promises.resolveSrv(`_mongodb._tcp.${m[1]}`); }
+  catch (e) {
+    if (!/ECONNREFUSED|ETIMEOUT|ESERVFAIL|EREFUSED|ECONNRESET|ENOTIMP/.test(e.code || e.message)) return; // e.g. ENOTFOUND: a wrong host, not a DNS problem
+    const fallback = ['8.8.8.8', '1.1.1.1', '8.8.4.4'];
+    dns.setServers(fallback);
+    console.log(`DNS: the system DNS refused the MongoDB lookup (${e.code}); using public DNS ${fallback.join(', ')}`);
+  }
 }
 
 export async function connectDb() {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set (server/.env locally, Environment variables on Hostinger).');
   dbState.attempts++;
+  await prepareDns(uri);
   client = new MongoClient(uri, { serverSelectionTimeoutMS: 15000 });
   await client.connect();
   database = client.db(dbNameFrom(uri));
@@ -72,6 +95,7 @@ export async function connectDb() {
   await col('screening_cases').createIndex({ assigned_to: 1, status: 1 });
   for (const c of ['case_events', 'case_remarks', 'screening_case_events', 'screening_case_remarks', 'screening_case_escalations'])
     await col(c).createIndex({ case_id: 1, id: 1 });
+  await col('case_views').createIndex({ user_id: 1, case_id: 1 });
 
   // counters never fall behind existing ids (e.g. after seeding from SQLite)
   for (const name of COLLECTIONS) {
@@ -79,9 +103,10 @@ export async function connectDb() {
     if (top?.id) await col('counters').updateOne({ _id: name }, { $max: { seq: top.id } }, { upsert: true });
   }
 
-  // the "True Match" action plan was retired: those cases belong under Red Flag
-  const moved = await col('screening_cases').updateMany({ module: 'true-match' }, { $set: { module: 'red-flag', updated_at: now() } });
-  if (moved.modifiedCount) console.log(`Moved ${moved.modifiedCount} case(s) from the True Match action plan to Red Flag`);
+  // "True Match" and "Red Flag" are no longer action plans: those cases keep their True Match status, have no action plan
+  // until the officer picks one, and are listed under Red Flag (every True Match except SAR)
+  const moved = await col('screening_cases').updateMany({ module: { $in: ['true-match', 'red-flag'] } }, { $set: { module: null, updated_at: now() } });
+  if (moved.modifiedCount) console.log(`${moved.modifiedCount} case(s) with the retired True Match / Red Flag action plan now listed under Red Flag`);
 
   // first start on an empty database: demo team (change these passwords after the first sign-in)
   if (!(await col('users').findOne({}))) {

@@ -345,8 +345,8 @@ const exact = {
   'User created': 'تم إنشاء المستخدم',
 
   /* ---------- cases: lists ---------- */
-  'Create cases and assign them to the team. A confirmed True Match gets an action plan: Red Flag, HM, SAR or no further action.':
-    'أنشئ الحالات وأسندها إلى الفريق. يحصل التطابق الحقيقي المؤكد على خطة إجراء: مؤشر خطر أو مراقبة مشددة أو تقرير نشاط مشبوه أو لا يلزم إجراء إضافي.',
+  'Create cases and assign them to the team. A confirmed True Match gets an action plan: HM, SAR or no further action, and is listed under Red Flag unless it is SAR.':
+    'أنشئ الحالات وأسندها إلى الفريق. يحصل التطابق الحقيقي المؤكد على خطة إجراء: مراقبة مشددة أو تقرير نشاط مشبوه أو لا يلزم إجراء إضافي، ويُدرج ضمن مؤشر الخطر ما لم يكن تقرير نشاط مشبوه.',
   'Cases assigned to you. Open a case and complete the review: every field is required.': 'الحالات المسندة إليك. افتح الحالة وأكمل المراجعة: جميع الحقول مطلوبة.',
   'Every case across the team. View only: your own cases are under My Cases.': 'جميع حالات الفريق. للعرض فقط: حالاتك موجودة في حالاتي.',
   'Assigned to me': 'المسندة إليّ',
@@ -425,7 +425,9 @@ const exact = {
   'confirmed after the manager’s recommendation': 'مؤكد بعد توصية المدير',
   'Heightened Monitoring uses the details from the escalation report.': 'تستخدم المراقبة المشددة التفاصيل من تقرير التصعيد.',
   'The case is closed with no further action.': 'تُغلق الحالة دون إجراء إضافي.',
-  'Moves the case into the Heightened Monitoring, Red Flag or SAR menu.': 'تنقل الحالة إلى قائمة المراقبة المشددة أو مؤشر الخطر أو تقرير النشاط المشبوه.',
+  'Heightened Monitoring and No further action cases are also listed under Red Flag; SAR cases only under SAR.': 'تُدرج حالات المراقبة المشددة وحالات عدم اتخاذ إجراء إضافي أيضاً ضمن مؤشر الخطر؛ وحالات تقرير النشاط المشبوه ضمنه فقط.',
+  'Every True Match whose action plan is not SAR. Heightened Monitoring cases also appear here.': 'كل تطابق حقيقي لا تكون خطة إجرائه تقرير نشاط مشبوه. تظهر هنا أيضاً حالات المراقبة المشددة.',
+  'No red flags yet. True Match cases appear here unless their action plan is SAR.': 'لا توجد مؤشرات خطر بعد. تظهر هنا حالات التطابق الحقيقي ما لم تكن خطة إجرائها تقرير نشاط مشبوه.',
   'Reason for closing it as no further action': 'سبب إغلاقها دون إجراء إضافي',
   'Reason for no further action': 'سبب عدم اتخاذ إجراء إضافي',
   'Save review': 'حفظ المراجعة',
@@ -519,6 +521,11 @@ const exact = {
   'Clear dates': 'مسح التواريخ',
   'All dates': 'كل التواريخ',
   'Invalid date': 'تاريخ غير صالح',
+
+  'New unassigned cases': 'حالات جديدة غير مسندة',
+  'New or updated cases': 'حالات جديدة أو محدّثة',
+  'New or updated cases assigned to you': 'حالات جديدة أو محدّثة مسندة إليك',
+  'New or updated cases for you to work on': 'حالات جديدة أو محدّثة بانتظار عملك',
 
   /* ---------- toasts and server messages ---------- */
   'Notification copied': 'تم نسخ الإخطار',

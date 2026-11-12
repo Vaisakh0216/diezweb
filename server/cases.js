@@ -85,6 +85,20 @@ async function hydrate(cases) {
 const getCase = async (id) => (await hydrate(await col('screening_cases').find({ id }).toArray()))[0];
 const logEvent = (case_id, type, detail, by_user, from_user = null, to_user = null) =>
   insert('screening_case_events', { case_id, type, detail: detail ?? null, from_user, to_user, by_user: by_user ?? null, at: now() });
+/**
+ * "Seen" state per user and case (case_views): a case is new for a user until they open its menu or the case,
+ * and becomes new again when someone else changes it (updated_at later than when they saw it).
+ */
+export async function markSeen(userId, caseIds) {
+  const ids = [...new Set((caseIds || []).map(Number).filter(Boolean))];
+  if (!userId || !ids.length) return;
+  const at = now();
+  await col('case_views').bulkWrite(ids.map((case_id) => ({
+    updateOne: { filter: { _id: `${userId}:${case_id}` }, update: { $set: { user_id: userId, case_id, at } }, upsert: true },
+  })), { ordered: false });
+}
+const seenMap = async (userId) => Object.fromEntries((await col('case_views').find({ user_id: userId }, { projection: { case_id: 1, at: 1 } }).toArray())
+  .map((v) => [v.case_id, v.at]));
 const addRemark = (case_id, user_id, body) => insert('screening_case_remarks', { case_id, user_id, body, created_at: now() });
 
 /* ---------- assignee matching (tolerates "Firaz" -> Firas Essghaier) ---------- */
@@ -205,15 +219,20 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
   const ownCase = (req, res, next) => (canEdit(req.user, req.scase) ? next()
     : res.status(403).json({ error: 'This case is not assigned to you (view only)' }));
   const DECIDED = (c) => T.DECISION_STATUSES.includes(c.status);
+  /** Red Flag list: every True Match whose action plan is not SAR */
+  const isRedFlag = (c) => c.status === T.TRUE_MATCH && c.module !== T.SAR_SLUG;
 
   /* sidebar counts per view: all | uncategorised | <module> */
   app.get('/api/cases/counts', auth, async (req, res) => {
     const me = req.user.id;
-    const blank = () => ({ mine: 0, unassigned: 0, active: 0, open: 0, mine_open: 0, mine_working: 0, mine_pending: 0, escalated_to_me: 0, awaiting_my_rec: 0 });
+    // *_new: the same numbers, counting only cases this user has not seen since they last changed (sidebar badges)
+    const blank = () => ({ mine: 0, unassigned: 0, active: 0, open: 0, mine_open: 0, mine_working: 0, mine_pending: 0, escalated_to_me: 0, awaiting_my_rec: 0,
+      mine_new: 0, unassigned_new: 0, active_new: 0, mine_working_new: 0 });
     const out = { all: blank(), uncategorised: blank(), ...Object.fromEntries(T.MODULE_SLUGS.map((s) => [s, blank()])) };
-    const cases = await hydrate(await col('screening_cases').find().toArray());
+    const [cases, seen] = await Promise.all([hydrate(await col('screening_cases').find().toArray()), seenMap(me)]);
     for (const c of cases) {
       const back = c.backFromManager;
+      const unseen = !seen[c.id] || String(c.updated_at || '') > seen[c.id];
       const k = {
         mine: c.assigned_to === me && c.status !== 'False',
         unassigned: c.assigned_to == null && c.status !== 'False',
@@ -225,8 +244,10 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
         escalated_to_me: c.escalated_to === me && c.status === T.ESCALATE,
         awaiting_my_rec: c.escalated_to === me && c.status === T.ESCALATE && !back,
       };
-      const view = c.module || 'uncategorised';
-      for (const [key, hit] of Object.entries(k)) if (hit) { if (out[view]) out[view][key]++; out.all[key]++; }
+      for (const key of ['mine', 'unassigned', 'active', 'mine_working']) k[`${key}_new`] = k[key] && unseen;
+      // a case counts in its action-plan menu and, when it is a red flag, also under Red Flag
+      const views = [c.module || 'uncategorised', ...(isRedFlag(c) ? [T.RED_FLAG_SLUG] : [])];
+      for (const [key, hit] of Object.entries(k)) if (hit) { for (const v of views) if (out[v]) out[v][key]++; out.all[key]++; }
     }
     res.json(out);
   });
@@ -235,13 +256,14 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
   app.get('/api/cases', auth, async (req, res) => {
     const q = req.query; const f = {};
     if (q.view === 'uncategorised') f.module = null;
+    else if (q.view === T.RED_FLAG_SLUG) { f.status = T.TRUE_MATCH; f.module = { $ne: T.SAR_SLUG }; }
     else if (T.ACTION_PLANS.includes(q.view)) f.module = q.view;
     // officers: their own cases, or every case (view-only Master Data) with scope=all
     const isAdm = req.user.role === 'admin';
     const scope = isAdm ? (q.scope || 'all') : q.scope === 'all' ? 'all' : 'mine';
     if (scope === 'mine') f.assigned_to = req.user.id;
     if (scope === 'unassigned') f.assigned_to = null;
-    if (scope === 'escalated') { f.escalated_to = req.user.id; f.status = T.ESCALATE; }
+    if (scope === 'escalated') { f.escalated_to = req.user.id; f.$and = [...(f.$and || []), { status: T.ESCALATE }]; }
     if (q.assignee && isAdm) f.assigned_to = +q.assignee;
     if (q.search) { const r = rx(q.search); f.$or = [{ request_no: r }, { company: r }, { wc_reference: r }, { matched_party: r }, { bu: r }]; }
     let list = await hydrate(await col('screening_cases').find(f).toArray());
@@ -261,6 +283,13 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
     res.json(list);
   });
 
+  /* the user has seen these cases (menu page opened) */
+  app.post('/api/cases/seen', auth, async (req, res) => {
+    const ids = Array.isArray(req.body?.caseIds) ? req.body.caseIds.slice(0, 5000) : [];
+    await markSeen(req.user.id, ids);
+    res.json({ ok: true });
+  });
+
   /* create one (uncategorised) */
   app.post('/api/cases', auth, adminOnly, async (req, res) => {
     const company = String(req.body?.company ?? '').trim();
@@ -277,6 +306,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
     try {
       const id = await insert('screening_cases', newCase(company, request_no, assignee?.id ?? null, req.user.id));
       await logEvent(id, 'created', 'Created manually', req.user.id, null, assignee?.id ?? null);
+      await markSeen(req.user.id, [id]);
       res.status(201).json(await getCase(id));
     } catch (e) {
       if (e.code === 11000) return res.status(409).json({ error: `A case for ${request_no} already exists` });
@@ -319,6 +349,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
     for (const r of valid) {
       const id = await insert('screening_cases', newCase(r.company, r.request_no, r.assignee?.id ?? null, req.user.id));
       await logEvent(id, 'created', `Bulk upload: ${req.file.originalname}`, req.user.id, null, r.assignee?.id ?? null);
+      await markSeen(req.user.id, [id]);
     }
     res.json({ created: valid.length, skipped: checked.length - valid.length, rows: checked });
   });
@@ -389,6 +420,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       if (changed.includes('module'))
         await logEvent(c.id, 'categorised', `Action plan: ${c.module ? MODULE_NAME[c.module] : 'None'} → ${v.module ? MODULE_NAME[v.module] : 'None'}`, req.user.id);
     }
+    await markSeen(req.user.id, [c.id]);
     res.json(await getCase(c.id));
   });
 
@@ -406,6 +438,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       { $set: { manager_rec: rec, manager_rec_other: rec === T.OTHERS ? other : null, manager_by: req.user.id, manager_at: now() } });
     await col('screening_cases').updateOne({ id: c.id }, { $set: { updated_at: now() } });
     await logEvent(c.id, 'manager', `${c.esc_manager_rec ? 'Updated' : 'Recorded'} manager recommendation: ${recText(rec, other)}`, req.user.id, null, c.assigned_to);
+    await markSeen(req.user.id, [c.id]);
     res.json(await getCase(c.id));
   });
 
@@ -421,6 +454,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       if (c.assigned_to === target.id) continue;
       await col('screening_cases').updateOne({ id: c.id }, { $set: { assigned_to: target.id, assigned_at: now(), updated_at: now() } });
       await logEvent(c.id, 'assigned', String(reason ?? '').trim().slice(0, TEXT_MAX), req.user.id, c.assigned_to ?? null, target.id);
+      await markSeen(req.user.id, [c.id]);
       k++;
     }
     res.json({ assigned: k });
@@ -448,12 +482,17 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       for (const name of ['screening_case_remarks', 'screening_case_events', 'screening_case_hm', 'screening_case_escalations'])
         await col(name).deleteMany({ case_id: c.id });
       await col('screening_cases').deleteOne({ id: c.id });
+      await col('case_views').deleteMany({ case_id: c.id });
       k++;
     }
     res.json({ deleted: k });
   });
 
-  app.get('/api/cases/:id/history', auth, loadCase, async (req, res) => res.json(await historyOf('screening_case_events', req.scase.id)));
+  // opening a case (its detail loads the history) marks it as seen
+  app.get('/api/cases/:id/history', auth, loadCase, async (req, res) => {
+    await markSeen(req.user.id, [req.scase.id]);
+    res.json(await historyOf('screening_case_events', req.scase.id));
+  });
 
   /* remarks (append-only) */
   app.get('/api/cases/:id/remarks', auth, loadCase, async (req, res) => res.json(await remarksOf('screening_case_remarks', req.scase.id)));
@@ -463,6 +502,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
     if (body.length > REMARK_MAX) return res.status(400).json({ error: `Remark is too long (max ${REMARK_MAX} characters)` });
     await addRemark(req.scase.id, req.user.id, body);
     await col('screening_cases').updateOne({ id: req.scase.id }, { $set: { updated_at: now() } });
+    await markSeen(req.user.id, [req.scase.id]);
     res.status(201).json(await remarksOf('screening_case_remarks', req.scase.id));
   });
 }

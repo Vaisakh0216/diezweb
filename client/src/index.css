@@ -589,3 +589,7 @@ img, svg, video { max-width: 100%; }
 [dir="rtl"] .modal > h3 { padding-right: 0; padding-left: 40px; }
 [dir="rtl"] .modal-x { right: auto; left: 14px; }
 @media (max-width: 640px) { .modal-x { top: 10px; right: 8px; } [dir="rtl"] .modal-x { left: 8px; } }
+
+/* multi-select list floats above tables, dialogs' content and sticky headers (see MultiSelect) */
+.ms-pop.ms-floating { position: fixed; top: auto; left: auto; z-index: 1000; min-width: 0; max-height: min(360px, 60vh); }
+[dir="rtl"] .ms-pop.ms-floating { right: auto; }

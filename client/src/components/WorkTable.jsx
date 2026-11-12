@@ -114,10 +114,10 @@ export function CaseDetail({ c, onClose, onRemarks, onDelete }) {
 
 /**
  * Officer work table.
- * view: 'lr' (License Renewal: no BU, raw template code) | 'other' (BU + mapped Application Type)
+ * Every application type in one list (BU and Application Type columns).
  * tab: 'work' | 'awaiting' | 'approved'
  */
-export default function WorkTable({ view, tab, scope, onChanged }) {
+export default function WorkTable({ tab, scope, onChanged }) {
   const { user } = useAuth();
   const meta = useMeta();
   const toast = useToast();
@@ -134,10 +134,10 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
 
   const load = () => {
     setLoading(true);
-    api('/edd/my-cases' + qs({ view, tab, scope, search, bu })).then((c) => { setCases(c); setSelected([]); })
+    api('/edd/my-cases' + qs({ tab, scope, search, bu })).then((c) => { setCases(c); setSelected([]); })
       .catch((e) => toast(e.message, 'error')).finally(() => setLoading(false));
   };
-  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [view, tab, scope, search, bu]);
+  useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); }, [tab, scope, search, bu]);
   useEffect(() => { api('/users').then(setUsers).catch(() => {}); }, []);
 
   const patch = async (c, body) => {
@@ -158,28 +158,25 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
     } catch (e) { toast(e.message, 'error'); }
   };
 
-  const showBu = view === 'other' || new Set(cases.map((c) => c.bu)).size > 1;
   const showRiskCols = tab === 'work' ? cases.some((c) => c.is_new) : true;
   const allChecked = cases.length > 0 && selected.length === cases.length;
   const showAssignee = isAdmin && scope !== 'mine';
 
-  const exportRows = () => exportCSV(`edd-${view}-${tab}.csv`, cases, [
+  const exportRows = () => exportCSV(`edd-${tab}.csv`, cases, [
     { label: 'Service Request#', get: (c) => c.request_no }, { label: 'Company Name', get: (c) => c.company },
     { label: 'Risk Rating', get: (c) => c.risk_rating }, { label: 'Root Cause', get: (c) => c.root_causes.join('; ') },
     { label: 'BU', get: (c) => c.bu }, { label: 'Created Date', get: (c) => fmtDate(c.created_date) },
-    { label: view === 'lr' ? 'Parent Service Template Code' : 'Application Type', get: (c) => (view === 'lr' ? c.record_type : c.app_type) },
+    { label: 'Application Type', get: (c) => c.app_type },
     { label: 'Status', get: (c) => c.edd_status || 'Open' }, { label: 'Assigned To', get: (c) => c.assigned_name },
   ]);
 
   return (
     <div className="card">
       <div className="toolbar">
-        <input id={`search-${view}-${tab}`} className="input grow" placeholder="Search request #, company…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {view === 'other' && (
-          <select className="input" value={bu} onChange={(e) => setBu(e.target.value)} id="filter-bu">
-            <option value="">All BUs</option>{meta.bus.map((b) => <option key={b}>{b}</option>)}
-          </select>
-        )}
+        <input id={`search-${tab}`} className="input grow" placeholder="Search request #, company…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="input" value={bu} onChange={(e) => setBu(e.target.value)} id="filter-bu">
+          <option value="">All BUs</option>{meta.bus.map((b) => <option key={b}>{b}</option>)}
+        </select>
         <button className="btn" onClick={exportRows} disabled={!cases.length}>⤓ Export</button>
       </div>
 
@@ -200,9 +197,9 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
               <th>Service Request#</th>
               <th>Company Name</th>
               {showRiskCols && <><th>Risk Rating</th><th>Root Cause</th></>}
-              {showBu && <th>BU</th>}
+              <th>BU</th>
               <th>Created Date</th>
-              <th>{view === 'lr' ? 'Parent Service Template Code' : 'Application Type'}</th>
+              <th>Application Type</th>
               {showAssignee && <th>Assigned to</th>}
               {tab !== 'work' && <th>Status date</th>}
               <th>Status</th>
@@ -235,9 +232,9 @@ export default function WorkTable({ view, tab, scope, onChanged }) {
                     <td className="col-tags">{c.root_causes.length ? c.root_causes.map((r) => <span key={r} className="tag">{r}</span>) : <span className="muted">—</span>}</td>
                   </>)
                 )}
-                {showBu && <td><span className="tag">{c.bu}</span></td>}
+                <td><span className="tag">{c.bu}</span></td>
                 <td>{fmtDate(c.created_date)}</td>
-                <td>{view === 'lr' ? <code style={{ fontSize: 12 }}>{c.record_type}</code> : c.app_type}</td>
+                <td title={c.record_type}>{c.app_type}</td>
                 {showAssignee && <td>{c.assigned_name || <span className="badge leave">Unassigned</span>}</td>}
                 {tab !== 'work' && <td className="muted">{fmtDate(c.status_at)}</td>}
                 <td>

@@ -20,7 +20,11 @@ export const MODULE_SLUGS = MODULES.map((m) => m.slug);
 export const HM_SLUG = 'heightened-monitoring';
 // Action plan (chosen once a case is a True Match): one of the module menus, or close it with no further action (reason required).
 export const NFA_SLUG = 'no-further-action';
-export const ACTION_PLANS = [...MODULE_SLUGS, NFA_SLUG];
+export const SAR_SLUG = 'sar';
+// Red Flag is a list, not an action plan: every True Match whose action plan is not SAR
+// (so Heightened Monitoring cases appear under both Heightened Monitoring and Red Flag).
+export const RED_FLAG_SLUG = 'red-flag';
+export const ACTION_PLANS = [HM_SLUG, SAR_SLUG, NFA_SLUG];
 // Inspection team mailbox used by "Notify inspection team" (blank = choose recipient in the mail app).
 export const INSPECTION_TEAM_EMAIL = process.env.INSPECTION_TEAM_EMAIL || '';
 export const ESCALATE = 'Escalate to Manager';

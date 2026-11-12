@@ -133,18 +133,19 @@ export default function Layout() {
     return () => window.removeEventListener("cases:changed", load);
   }, [pathname]);
   // officers: their active cases · admins: unassigned (All Cases) and active cases per category
+  // blue badges count only cases the user has not seen yet (cleared by opening the menu page or the case)
   const n = (k) =>
     (isAdmin
       ? k === "all"
-        ? cc.all?.unassigned
-        : cc[k]?.active
-      : cc[k]?.mine) || 0;
+        ? cc.all?.unassigned_new
+        : cc[k]?.active_new
+      : cc[k]?.mine_new) || 0;
   const title = (k) =>
     isAdmin
       ? k === "all"
-        ? "Unassigned cases"
-        : "Active cases"
-      : "Active cases assigned to you";
+        ? "New unassigned cases"
+        : "New or updated cases"
+      : "New or updated cases assigned to you";
   // escalation managers: cases waiting for their recommendation (orange badge next to All Cases)
   const escBadge = (user.escalation_manager && cc.all?.awaiting_my_rec) || 0;
   const Count = ({ k }) =>
@@ -256,9 +257,9 @@ export default function Layout() {
             {!isAdmin && (
               <Sub to="/cases/mine" id="nav-cases-mine">
                 <span className="nav-text">My Cases</span>
-                {cc.all?.mine_working > 0 && (
-                  <span className="nav-count" title="Active cases for you to work on">
-                    {cc.all.mine_working}
+                {cc.all?.mine_working_new > 0 && (
+                  <span className="nav-count" title="New or updated cases for you to work on">
+                    {cc.all.mine_working_new}
                   </span>
                 )}
               </Sub>

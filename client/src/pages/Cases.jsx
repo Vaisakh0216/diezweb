@@ -27,7 +27,10 @@ const Badge = ({ v }) =>
   );
 // Action plan for a True Match: one of the case menus, or close with no further action
 const NFA = { slug: "no-further-action", name: "No further action" };
-const ACTION_PLANS = [...CASE_MODULES, NFA];
+// Action plans for a True Match. Red Flag is not one: it lists every True Match whose action plan is not SAR.
+const RED_FLAG = "red-flag";
+const ACTION_PLANS = [...CASE_MODULES.filter((m) => m.slug !== RED_FLAG), NFA];
+const isRedFlag = (u, meta) => u.status === meta.trueMatch && u.module !== "sar";
 const moduleName = (slug) => ACTION_PLANS.find((m) => m.slug === slug)?.name;
 const fmtDay = (s) => (s ? fmtStamp(s).split(",")[0] : "");
 
@@ -193,7 +196,7 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
       ...f,
       status: on ? TM : c.status !== TM ? c.status : statusOptions[0],
       // a True Match goes to Red Flag unless the officer picks another action plan
-      ...(on ? { module: f.module || "red-flag" } : { module: c.status === TM ? "" : c.module || "" }),
+      ...(on ? { module: ACTION_PLANS.some((p) => p.slug === f.module) ? f.module : "" } : { module: c.status === TM ? "" : c.module || "" }),
     });
   const isNFA = isTM && f.module === NFA.slug;
   const needReason = f.status === "False";
@@ -682,7 +685,7 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
                 ? "Heightened Monitoring uses the details from the escalation report."
                 : isNFA
                 ? "The case is closed with no further action."
-                : "Moves the case into the Heightened Monitoring, Red Flag or SAR menu."}
+                : "Heightened Monitoring and No further action cases are also listed under Red Flag; SAR cases only under SAR."}
             </span>
           </div>
         )}
@@ -1510,7 +1513,8 @@ export default function Cases() {
 
   // All Cases: open (waiting for a decision) | completed (True Match / False) | all · categories: active | false | all
   // My Cases: working (Active) | pending (escalated to a manager) | completed
-  const firstTab = isMine ? "working" : listView === "all" ? "open" : "active";
+  // Red Flag: a single "All" tab for now (every red-flag case)
+  const firstTab = view === RED_FLAG ? "all" : isMine ? "working" : listView === "all" ? "open" : "active";
   const [tab, setTab] = useState(firstTab);
   const [scope, setScope] = useState(defaultScope);
   const [category, setCategory] = useState(""); // only on All Cases
@@ -1532,6 +1536,12 @@ export default function Cases() {
       .then((c) => {
         setCases(c);
         setSelected([]);
+        // the user has now seen these cases: clears the sidebar badge for this menu
+        // (not the officers' view-only Master Data: it has no badge and shows other people's cases)
+        if (c.length && !readOnly)
+          api("/cases/seen", { method: "POST", body: { caseIds: c.map((x) => x.id) } })
+            .then(() => notifyCasesChanged())
+            .catch(() => {});
       })
       .catch((e) => toast(e.message, "error"))
       .finally(() => setLoading(false));
@@ -1589,6 +1599,8 @@ export default function Cases() {
       (listView === "all"
         ? !category ||
           (category === "uncategorised" ? !u.module : u.module === category)
+        : view === RED_FLAG
+        ? isRedFlag(u, meta)
         : u.module === view) &&
       (tab === "all" ||
         (tab === "working"
@@ -1702,13 +1714,15 @@ export default function Cases() {
           <h1>{module ? module.name : isMine ? "My Cases" : "Master Data"}</h1>
           <p>
             {module
-              ? `True Match cases with ${module.name} as the action plan.`
+              ? module.slug === RED_FLAG
+                ? "Every True Match whose action plan is not SAR. Heightened Monitoring cases also appear here."
+                : `True Match cases with ${module.name} as the action plan.`
               : isMine
               ? "Cases assigned to you. Open a case and complete the review: every field is required."
               : readOnly
               ? "Every case across the team. View only: your own cases are under My Cases."
               : isAdmin
-              ? "Create cases and assign them to the team. A confirmed True Match gets an action plan: Red Flag, HM, SAR or no further action."
+              ? "Create cases and assign them to the team. A confirmed True Match gets an action plan: HM, SAR or no further action, and is listed under Red Flag unless it is SAR."
               : "Cases assigned to you. Open a case and complete the review: every field is required."}
           </p>
         </div>
@@ -1817,7 +1831,7 @@ export default function Cases() {
               Completed
             </button>
           </>
-        ) : (
+        ) : view === RED_FLAG ? null : (
           <>
             <button
               id="cs-tab-active"
@@ -1842,6 +1856,12 @@ export default function Cases() {
             onClick={() => setTab("all")}
           >
             All
+            {view === RED_FLAG && (
+              <>
+                {" "}
+                <span className="count">{tab === "all" && !loading ? cases.length : "…"}</span>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -2081,7 +2101,9 @@ export default function Cases() {
                       : !["active", "open"].includes(tab)
                       ? "Nothing here yet"
                       : module
-                      ? `No ${module.name} cases yet. Cases appear here once a True Match gets ${module.name} as its action plan.`
+                      ? module.slug === RED_FLAG
+                        ? "No red flags yet. True Match cases appear here unless their action plan is SAR."
+                        : `No ${module.name} cases yet. Cases appear here once a True Match gets ${module.name} as its action plan.`
                       : readOnly
                       ? "No cases waiting for a decision."
                       : isAdmin

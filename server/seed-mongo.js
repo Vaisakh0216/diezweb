@@ -10,7 +10,7 @@
 import Database from 'better-sqlite3';
 import { MongoClient } from 'mongodb';
 import { fileURLToPath } from 'node:url';
-import { dbNameFrom } from './db.js';
+import { dbNameFrom, prepareDns } from './db.js';
 
 const args = new Set(process.argv.slice(2));
 const DRY = args.has('--dry-run');
@@ -49,6 +49,7 @@ if (DRY) {
 
 const URI = process.env.MONGODB_URI;
 if (!URI) { console.error('MONGODB_URI is not set (server/.env).'); process.exit(1); }
+await prepareDns(URI);
 const client = new MongoClient(URI, { serverSelectionTimeoutMS: 15000 });
 try {
   await client.connect();
