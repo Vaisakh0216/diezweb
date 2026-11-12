@@ -117,7 +117,7 @@ export default function EddOverview() {
                     </td>
                     <td>{u.uploaded_by_name}</td>
                     <td>
-                      {fmtDate(u.date_from)} → {fmtDate(u.date_to)}
+                      {u.date_from || u.date_to ? `${u.date_from ? fmtDate(u.date_from) : '…'} → ${u.date_to ? fmtDate(u.date_to) : '…'}` : 'All dates'}
                     </td>
                     <td style={{ color: "var(--primary-2)" }}>
                       {s.newCases ?? 0}

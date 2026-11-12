@@ -155,6 +155,7 @@ a { color: inherit; text-decoration: none; }
 }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .grid { display: grid; gap: 16px; }
+.grid > * { min-width: 0; } /* wide tables scroll inside their card instead of stretching it */
 .stats { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-bottom: 20px; }
 .stat { position: relative; overflow: hidden; }
 .stat .label { color: var(--muted); font-size: 12px; font-weight: 500; }

@@ -4,7 +4,6 @@ import { api, fmtDate } from '../api.js';
 import { useAuth, useMeta, useToast } from '../context.jsx';
 
 const ACCEPT = '.xlsx,.xls,.csv,.ods';
-const today = new Date().toISOString().slice(0, 10);
 
 export default function BulkUpload() {
   const { user } = useAuth();
@@ -14,7 +13,8 @@ export default function BulkUpload() {
   const [file, setFile] = useState(null);
   const [drag, setDrag] = useState(false);
   const [preview, setPreview] = useState(null);
-  const [range, setRange] = useState({ from: '', to: today });
+  // optional: empty = import every row in the file
+  const [range, setRange] = useState({ from: '', to: '' });
   const [defaultBu, setDefaultBu] = useState('DSO');
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -27,7 +27,7 @@ export default function BulkUpload() {
     try {
       const p = await api('/edd/preview', { method: 'POST', form });
       setPreview(p);
-      setRange({ from: p.minDate || today, to: p.maxDate || today });
+      setRange({ from: '', to: '' });
     } catch (e) { toast(e.message, 'error'); setFile(null); }
     finally { setBusy(false); }
   };
@@ -35,7 +35,9 @@ export default function BulkUpload() {
   const submit = async () => {
     setBusy(true);
     const form = new FormData();
-    form.append('file', file); form.append('dateFrom', range.from); form.append('dateTo', range.to); form.append('defaultBu', defaultBu);
+    form.append('file', file); form.append('defaultBu', defaultBu);
+    if (range.from) form.append('dateFrom', range.from);
+    if (range.to) form.append('dateTo', range.to);
     try { const r = await api('/edd/upload', { method: 'POST', form }); setResult(r); toast(`${r.newCases} new · ${r.resubmitted} resubmitted · ${r.history} history`); }
     catch (e) { toast(e.message, 'error'); }
     finally { setBusy(false); }
@@ -56,7 +58,7 @@ export default function BulkUpload() {
 
       <div className="steps">
         <div className={`step ${step >= 1 ? 'on' : ''}`}><b>1</b>Select export</div>
-        <div className={`step ${step >= 2 ? 'on' : ''}`}><b>2</b>Date range</div>
+        <div className={`step ${step >= 2 ? 'on' : ''}`}><b>2</b>Date range (optional)</div>
         <div className={`step ${step >= 3 ? 'on' : ''}`}><b>3</b>Results</div>
       </div>
 
@@ -79,8 +81,20 @@ export default function BulkUpload() {
               <div className="sys-badge">{preview.system}</div>
               <div className="muted">{file.name} · {preview.total} rows · {fmtDate(preview.minDate)} → {fmtDate(preview.maxDate)}</div>
             </div>
-            <div className="field"><label>Created date from</label><input id="range-from" type="date" className="input" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></div>
-            <div className="field"><label>Created date to</label><input id="range-to" type="date" className="input" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></div>
+            <div className="field"><label htmlFor="range-from">Created date from <span className="muted">(optional)</span></label>
+              <input id="range-from" type="date" className="input" value={range.from} min={preview.minDate || undefined} max={range.to || undefined}
+                onChange={(e) => setRange({ ...range, from: e.target.value })} /></div>
+            <div className="field"><label htmlFor="range-to">Created date to <span className="muted">(optional)</span></label>
+              <input id="range-to" type="date" className="input" value={range.to} min={range.from || undefined}
+                onChange={(e) => setRange({ ...range, to: e.target.value })} /></div>
+            <div className="muted" style={{ fontSize: 12, marginTop: -6 }} id="range-note">
+              {range.from && range.to && range.from > range.to
+                ? <span style={{ color: 'var(--danger)' }}>From date must be before To date.</span>
+                : range.from || range.to
+                ? <>Only rows created {range.from ? `from ${fmtDate(range.from)}` : ''}{range.from && range.to ? ' ' : ''}{range.to ? `up to ${fmtDate(range.to)}` : ''} are imported.
+                  {' '}<a href="#" style={{ color: 'var(--primary-2)' }} onClick={(e) => { e.preventDefault(); setRange({ from: '', to: '' }); }}>Clear dates</a></>
+                : <>No dates selected: all {preview.total} rows in the file are imported.</>}
+            </div>
             {preview.needsBu && (
               <div className="field"><label>BU for non-IFZA templates</label>
                 <select id="default-bu" className="input" value={defaultBu} onChange={(e) => setDefaultBu(e.target.value)}>
@@ -91,12 +105,32 @@ export default function BulkUpload() {
             )}
             <div className="row">
               <button className="btn" onClick={reset}>Cancel</button>
-              <button id="btn-import" className="btn btn-primary" style={{ flex: 1 }} disabled={busy || !range.from || !range.to} onClick={submit}>{busy ? 'Importing…' : 'Filter & Import'}</button>
+              <button id="btn-import" className="btn btn-primary" style={{ flex: 1 }} disabled={busy || (range.from && range.to && range.from > range.to)} onClick={submit}>{busy ? 'Importing…' : 'Filter & Import'}</button>
             </div>
           </div>
-          <div className="card" style={{ minWidth: 0 }}>
-            <h3 style={{ fontSize: 16, marginBottom: 12 }}>Preview: how rows will be read</h3>
-            <div className="table-wrap">
+          <div className="card grid" style={{ minWidth: 0 }}>
+            <div>
+              <h3 style={{ fontSize: 16, marginBottom: 4 }}>Application types in this file</h3>
+              <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>Each Salesforce template is saved under the application type shown.</p>
+              <div className="table-wrap" id="preview-types">
+                <table>
+                  <thead><tr><th>Salesforce template</th><th>Application type</th><th>Rows</th></tr></thead>
+                  <tbody>{(preview.types || []).map((t) => (
+                    <tr key={t.record_type}>
+                      <td><code style={{ fontSize: 12 }}>{t.record_type}</code></td>
+                      <td>{t.app_type ? <b>{t.app_type}</b> : <span className="badge leave">Unmapped: not imported</span>}</td>
+                      <td>{t.count}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+            <div>
+            <h3 style={{ fontSize: 16, marginBottom: 12 }}>
+              Preview: how rows will be read <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}>
+                · {preview.sample.length < preview.total ? `first ${preview.sample.length} of ${preview.total}` : `all ${preview.total}`} rows</span>
+            </h3>
+            <div className="table-wrap" style={{ maxHeight: 420 }}>
               <table>
                 <thead><tr><th>Request #</th><th>Company</th><th>Created</th><th>Salesforce template</th><th>Application type</th><th>Owner</th><th>BU</th></tr></thead>
                 <tbody>{preview.sample.map((r, i) => (
@@ -105,6 +139,7 @@ export default function BulkUpload() {
                     <td>{r.bu}{r.completed && <span className="muted" style={{ fontSize: 11 }}> · completed</span>}</td></tr>
                 ))}</tbody>
               </table>
+            </div>
             </div>
           </div>
         </div>

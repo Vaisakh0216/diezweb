@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import { TEAM, APP_TYPES, BUS } from './terms.js';
 
 export const COLLECTIONS = ['users', 'uploads', 'edd_cases', 'case_events', 'case_remarks', 'screening_cases', 'screening_case_events',
-  'screening_case_remarks', 'screening_case_hm', 'screening_case_escalations', 'screening_case_deletions'];
+  'screening_case_remarks', 'screening_case_hm', 'screening_case_escalations', 'screening_case_deletions', 'edd_case_deletions'];
 
 let client;
 let database;

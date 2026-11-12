@@ -239,18 +239,30 @@ app.post('/api/edd/preview', auth, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const { system, tpl, headers, rows } = parseFile(req.file.buffer);
-    const sample = rows.slice(0, 5).map((r) => normaliseRow(system, tpl, r, 'DSO'));
+    const all = rows.map((r) => normaliseRow(system, tpl, r, 'DSO'));
+    // every Salesforce template in the file -> the application type it becomes (with row counts)
+    const byType = {};
+    for (const r of all) {
+      const k = r.record_type || '(blank)';
+      (byType[k] ??= { record_type: k, app_type: r.app_type, count: 0 }).count++;
+    }
+    const types = Object.values(byType).sort((a, b) => (!a.app_type) - (!b.app_type) || b.count - a.count);
     const needsBu = system === 'DSO' && rows.some((r) => !/^IFZA[_ ]/i.test(String(r.get('record_type'))));
-    const dates = rows.map((r) => toISODate(r.get('created'), tpl.dateOrder)).filter(Boolean).sort();
-    res.json({ system, headers, total: rows.length, sample, needsBu, minDate: dates[0], maxDate: dates.at(-1) });
+    const dates = all.map((r) => r.created_date).filter(Boolean).sort();
+    const sample = all.slice(0, 500).map(({ data, ...r }) => r); // rows for the preview table (without the raw export columns)
+    res.json({ system, headers, total: rows.length, sample, types, needsBu, minDate: dates[0], maxDate: dates.at(-1) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const { dateFrom, dateTo, defaultBu = 'DSO' } = req.body;
-  if (!dateFrom || !dateTo) return res.status(400).json({ error: 'Date range is required' });
-  if (dateFrom > dateTo) return res.status(400).json({ error: 'From date must be before To date' });
+  // optional date range: no dates = import every row; one or both dates = filter by created date
+  const dateFrom = String(req.body.dateFrom || '').trim() || null;
+  const dateTo = String(req.body.dateTo || '').trim() || null;
+  const { defaultBu = 'DSO' } = req.body;
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  if ((dateFrom && !ISO.test(dateFrom)) || (dateTo && !ISO.test(dateTo))) return res.status(400).json({ error: 'Invalid date' });
+  if (dateFrom && dateTo && dateFrom > dateTo) return res.status(400).json({ error: 'From date must be before To date' });
   if (!T.DSO_GROUP.includes(defaultBu)) return res.status(400).json({ error: 'Invalid default BU' });
 
   let parsed;
@@ -281,8 +293,11 @@ app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
 
   for (const raw of rows) {
     const r = normaliseRow(system, tpl, raw, defaultBu);
-    if (!r.created_date) { S.noDate++; continue; }
-    if (r.created_date < dateFrom || r.created_date > dateTo) { S.outOfRange++; continue; }
+    if (dateFrom || dateTo) {
+      // only when filtering by date does a row need a valid created date
+      if (!r.created_date) { S.noDate++; continue; }
+      if ((dateFrom && r.created_date < dateFrom) || (dateTo && r.created_date > dateTo)) { S.outOfRange++; continue; }
+    }
     if (!r.app_type) { S.unmapped++; S.unmappedTypes[r.record_type || '(blank)'] = (S.unmappedTypes[r.record_type || '(blank)'] || 0) + 1; continue; }
     const key = `${r.bu}|${r.request_no}`;
     if (seen.has(key)) { S.dupInFile++; continue; }
@@ -500,6 +515,27 @@ app.post('/api/edd/cases/transfer', auth, async (req, res) => {
     n++;
   }
   res.json({ transferred: n });
+});
+
+/* delete applications (admin). A full copy (application + remarks + activity) is kept in edd_case_deletions for audit. */
+app.post('/api/edd/cases/delete', auth, adminOnly, async (req, res) => {
+  const { caseIds, reason } = req.body || {};
+  const why = String(reason ?? '').trim();
+  if (!Array.isArray(caseIds) || !caseIds.length) return res.status(400).json({ error: 'No cases selected' });
+  if (!why) return res.status(400).json({ error: 'Give a reason for deleting' });
+  if (why.length > 1000) return res.status(400).json({ error: 'Reason is too long (max 1000 characters)' });
+  let n = 0;
+  for (const c of await col('edd_cases').find({ id: { $in: caseIds.map(Number) } }).toArray()) {
+    const of = (name) => col(name).find({ case_id: c.id }).sort({ id: 1 }).toArray().then((r) => r.map(strip));
+    const snapshot = { case: strip(c), remarks: await of('case_remarks'), events: await of('case_events') };
+    await insert('edd_case_deletions', { case_id: c.id, bu: c.bu, request_no: c.request_no, company: c.company, snapshot, reason: why,
+      deleted_by: req.user.id, deleted_at: now() });
+    await col('case_remarks').deleteMany({ case_id: c.id });
+    await col('case_events').deleteMany({ case_id: c.id });
+    await col('edd_cases').deleteOne({ id: c.id });
+    n++;
+  }
+  res.json({ deleted: n });
 });
 
 /** activity rows with the names of the people involved */

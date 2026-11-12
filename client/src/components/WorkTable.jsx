@@ -71,11 +71,13 @@ export function RemarkCount({ n }) {
 }
 
 /** Case detail + remarks + history modal (shared) */
-export function CaseDetail({ c, onClose, onRemarks }) {
+export function CaseDetail({ c, onClose, onRemarks, onDelete }) {
   const [history, setHistory] = useState([]);
   useEffect(() => { api(`/edd/cases/${c.id}/history`).then(setHistory).catch(() => {}); }, [c.id]);
   return (
-    <Modal size="xl" title={`${c.request_no} · ${c.company}`} onClose={onClose} footer={<button className="btn" onClick={onClose}>Close</button>}>
+    <Modal size="xl" title={`${c.request_no} · ${c.company}`} onClose={onClose} footer={<>
+      {onDelete && <button id="btn-delete-edd" className="btn btn-danger" style={{ marginRight: 'auto' }} onClick={onDelete}>🗑 Delete application</button>}
+      <button className="btn" onClick={onClose}>Close</button></>}>
       <div className="detail-split">
         <div className="detail-main">
           <div className="row" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
