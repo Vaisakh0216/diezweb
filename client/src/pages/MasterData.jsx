@@ -89,7 +89,7 @@ export default function MasterData() {
             <tbody>
               {cases.map((c) => (
                 <tr key={c.id} className={selected.includes(c.id) ? 'selected' : ''}>
-                  {isAdmin && <td><input type="checkbox" aria-label={`Select ${c.request_no}`} checked={selected.includes(c.id)} onChange={() => toggle(c.id)} /></td>}
+                  {isAdmin && <td className="col-check"><input type="checkbox" aria-label={`Select ${c.request_no}`} checked={selected.includes(c.id)} onChange={() => toggle(c.id)} /></td>}
                   <td><a href="#" onClick={(e) => { e.preventDefault(); setDetail(c); }} className="cell-link">{c.request_no}</a>
                     {c.resubmission_count > 0 && <> <span className="badge resub">×{c.resubmission_count}</span></>}
                     {c.remark_count > 0 && <> <RemarkCount n={c.remark_count} /></>}</td>

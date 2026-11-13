@@ -208,7 +208,7 @@ export default function WorkTable({ tab, scope, onChanged }) {
           <tbody>
             {cases.map((c) => (
               <tr key={c.id} className={selected.includes(c.id) ? 'selected' : ''}>
-                <td><input type="checkbox" checked={selected.includes(c.id)} onChange={() => setSelected((s) => (s.includes(c.id) ? s.filter((x) => x !== c.id) : [...s, c.id]))} /></td>
+                <td className="col-check"><input type="checkbox" checked={selected.includes(c.id)} onChange={() => setSelected((s) => (s.includes(c.id) ? s.filter((x) => x !== c.id) : [...s, c.id]))} /></td>
                 <td>
                   <a href="#" onClick={(e) => { e.preventDefault(); setDetail(c); }} className="cell-link">{c.request_no}</a>
                   <div className="row" style={{ marginTop: 4, gap: 6 }}>

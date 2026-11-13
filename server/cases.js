@@ -24,7 +24,7 @@ const recText = (rec, other) => (rec === T.OTHERS && other ? `Others: ${other}` 
 
 // every field of a case document (null when not set), so the API shape never changes
 const CASE_FIELDS = ['id', 'request_no', 'company', 'module', 'assigned_to', 'app_type', 'wc_reference', 'matched_party', 'alert_category', 'status',
-  'alert_result', 'false_reason', 'escalated_to', 'escalated_at', 'categorised_at', 'created_by', 'assigned_at', 'created_at', 'updated_at', 'bu', 'nfa_reason'];
+  'alert_result', 'false_reason', 'escalated_to', 'escalated_at', 'categorised_at', 'created_by', 'assigned_at', 'created_at', 'updated_at', 'bu', 'nfa_reason', 'is_ubo'];
 
 /* Escalate to Manager: the officer writes the report (crime/alert details + inspection team notification) and their recommendation; the rest is auto-populated. */
 function validateEscalation(b) {
@@ -66,6 +66,7 @@ async function hydrate(cases) {
   }
   return cases.map((raw) => {
     const c = Object.fromEntries(CASE_FIELDS.map((f) => [f, raw[f] ?? null]));
+    c.is_ubo = raw.is_ubo === true;
     const hm = H[c.id]; const e = E[c.id];
     return Object.defineProperty({
       ...c,
@@ -160,6 +161,8 @@ async function validateReview(c, b) {
     if (val.length > TEXT_MAX) return { error: `${LABELS[f]} is too long` };
     v[f] = val;
   }
+  // optional: the matched individual is a UBO of the company
+  v.is_ubo = b.is_ubo === true;
   // An escalated case comes back (True Match / False) only after the manager's recommendation is recorded.
   if (c.status === T.ESCALATE && v.status !== T.ESCALATE && !c.esc_manager_rec)
     return { error: 'This case is waiting for the manager’s recommendation. Once it is recorded you can set True Match or False.' };
@@ -412,6 +415,7 @@ export default function registerCaseRoutes(app, { auth, adminOnly, upload, publi
       await col('screening_cases').updateOne({ id: c.id }, { $set: { ...v, updated_at: now() } });
       const plain = ['app_type', 'bu', 'wc_reference', 'matched_party', 'alert_category'].filter((f) => changed.includes(f));
       if (plain.length) await logEvent(c.id, 'updated', plain.map((f) => `${LABELS[f]}: ${v[f]}`).join(' · '), req.user.id);
+      if (changed.includes('is_ubo')) await logEvent(c.id, 'updated', v.is_ubo ? 'Marked: Is individual a UBO' : 'Unmarked: Is individual a UBO', req.user.id);
       if (changed.includes('status')) await logEvent(c.id, 'status', `${c.status} → ${v.status}`, req.user.id);
       if (v.status === T.ESCALATE && (v.escalated_to !== c.escalated_to || c.status !== T.ESCALATE))
         await logEvent(c.id, 'escalated', `Officer recommendation: ${recText(esc?.investigator_rec, esc?.investigator_rec_other) || '—'} · waiting for the manager’s decision`, req.user.id, null, v.escalated_to);

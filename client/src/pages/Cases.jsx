@@ -104,8 +104,6 @@ function buildNotifyTemplate({
     `Crime/alert details: ${details || "—"}`,
     `Investigator: ${investigator}`,
     "",
-    `Kindly arrange the necessary inspection and keep the ${ORG.department} team informed of any findings.`,
-    "",
     "Regards,",
     investigator,
     `${ORG.department} Department, ${ORG.company}`,
@@ -139,6 +137,11 @@ function NotifyActions({ subject, body }) {
   );
 }
 
+/** shown under the matched individual when the officer ticked "Is individual a UBO ?" */
+function UboNote() {
+  return <div className="ubo-note">Is individual a UBO</div>;
+}
+
 function ReviewModal({ c, managers, onClose, onSaved }) {
   const meta = useMeta();
   const { user } = useAuth();
@@ -147,7 +150,9 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
     bu: c.bu || guessBu(meta, c.request_no),
     wc_reference: c.wc_reference || "",
     matched_party: c.matched_party || "",
-    alert_category: c.alert_category || "",
+    is_ubo: !!c.is_ubo,
+    // a category that is no longer offered must be picked again
+    alert_category: meta.alertCategories.includes(c.alert_category) ? c.alert_category : "",
     status: c.status || "Under Review",
     false_reason: c.false_reason || "",
     escalated_to: c.escalated_to ? String(c.escalated_to) : "",
@@ -433,6 +438,15 @@ function ReviewModal({ c, managers, onClose, onSaved }) {
             value={f.matched_party}
             onChange={set("matched_party")}
           />
+          <label className="check-line" htmlFor="rv-ubo">
+            <input
+              id="rv-ubo"
+              type="checkbox"
+              checked={f.is_ubo}
+              onChange={(e) => setF({ ...f, is_ubo: e.target.checked })}
+            />
+            Is individual a UBO ?
+          </label>
         </div>
         <div className="field">
           <Req htmlFor="rv-cat">Alert Category</Req>
@@ -1407,7 +1421,14 @@ function CaseDetail({
             <F l="Application Type">{c.app_type}</F>
             <F l="BU">{c.bu}</F>
             <F l="World-Check Reference">{c.wc_reference}</F>
-            <F l="Matched Individual/Company">{c.matched_party}</F>
+            <F l="Matched Individual/Company">
+              {c.matched_party && (
+                <>
+                  {c.matched_party}
+                  {c.is_ubo && <UboNote />}
+                </>
+              )}
+            </F>
             <F l="Alert Category">{c.alert_category}</F>
             <F l="Status">{c.status}</F>
             {c.status === "False" && (
@@ -1683,6 +1704,7 @@ export default function Cases() {
         { label: "BU", get: (c) => c.bu },
         { label: "World-Check Reference", get: (c) => c.wc_reference },
         { label: "Matched Individual/Company", get: (c) => c.matched_party },
+        { label: "Is individual a UBO", get: (c) => (c.is_ubo ? "Yes" : "") },
         { label: "Alert Category", get: (c) => c.alert_category },
         { label: "Status", get: (c) => c.status },
         { label: "Reason for False", get: (c) => c.false_reason },
@@ -1974,7 +1996,7 @@ export default function Cases() {
                   className={selected.includes(c.id) ? "selected" : ""}
                 >
                   {isAdmin && (
-                    <td>
+                    <td className="col-check">
                       <input
                         type="checkbox"
                         checked={selected.includes(c.id)}
@@ -2070,6 +2092,7 @@ export default function Cases() {
                   <td>{c.wc_reference || <span className="muted">—</span>}</td>
                   <td className="col-wrap">
                     {c.matched_party || <span className="muted">—</span>}
+                    {c.is_ubo && c.matched_party && <UboNote />}
                   </td>
                   <td>
                     {c.alert_category || <span className="muted">—</span>}

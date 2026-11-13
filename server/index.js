@@ -272,8 +272,8 @@ app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
   const users = (await col('users').find().toArray()).map(publicUser);
   const active = users.filter((u) => u.status === 'active');
   const load = await openLoad();
-  const isAdmin = req.user.role === 'admin';
-
+  // any user can upload: every application goes to the officer whose duties (application type + BU) match,
+  // or to its Salesforce owner, whoever uploads the file
   const pickAssignee = (r) => {
     const owner = findOwner(users, r.owner_name);
     if (owner && owner.status === 'active') return owner;
@@ -284,7 +284,7 @@ app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
     return pool[0];
   };
 
-  const S = { system, total: rows.length, outOfRange: 0, noDate: 0, unmapped: 0, unmappedTypes: {}, dupInFile: 0, notYours: 0,
+  const S = { system, total: rows.length, outOfRange: 0, noDate: 0, unmapped: 0, unmappedTypes: {}, dupInFile: 0,
     newCases: 0, resubmitted: 0, history: 0, alreadyOpen: 0, alreadyApproved: 0, unassigned: 0, perUser: {} };
   const seen = new Set();
 
@@ -312,7 +312,6 @@ app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
         S.history++; continue;
       }
       if (existing.edd_status == null) { S.alreadyOpen++; continue; }
-      if (!isAdmin && existing.assigned_to !== req.user.id) { S.notYours++; continue; }
       // Requested / Returned -> client has submitted the form: back to work queue
       await col('edd_cases').updateOne({ id: existing.id }, { $set: { edd_status: null, resubmitted_at: now(), updated_at: now(), data: r.data },
         $inc: { resubmission_count: 1 } });
@@ -324,11 +323,7 @@ app.post('/api/edd/upload', auth, upload.single('file'), async (req, res) => {
     }
 
     // New case
-    let assignee = r.completed ? findOwner(users, r.owner_name) : pickAssignee(r);
-    if (!isAdmin && !r.completed) {
-      if (!(assignee?.id === req.user.id || (req.user.duties.includes(r.app_type) && req.user.bus.includes(r.bu)))) { S.notYours++; continue; }
-      assignee = req.user;
-    }
+    const assignee = r.completed ? findOwner(users, r.owner_name) : pickAssignee(r);
     const id = await insert('edd_cases', {
       upload_id: uploadId, system, bu: r.bu, request_no: r.request_no, company: r.company, created_date: r.created_date,
       record_type: r.record_type, app_type: r.app_type, owner_name: r.owner_name, assigned_to: assignee?.id ?? null,

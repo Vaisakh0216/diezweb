@@ -53,7 +53,7 @@ export default function BulkUpload() {
       <div className="page-head">
         <div><div className="crumb">Enhanced Due Diligence</div><h1>Bulk Upload</h1>
           <p>Upload a Salesforce export from <b>DSO</b>, <b>DAFZ</b> or <b>DCC</b>. The system is detected from the column headings.
-            {user.role !== 'admin' && ' Only applications for your duties are imported.'}</p></div>
+            {' '}Each application is assigned to the officer whose duties match its application type and BU.</p></div>
       </div>
 
       <div className="steps">
@@ -158,7 +158,6 @@ export default function BulkUpload() {
             {result.dupInFile > 0 && <Stat label="Duplicate rows in file" value={result.dupInFile} />}
             {result.unmapped > 0 && <Stat label="Unmapped template" value={result.unmapped} accent="var(--danger)" />}
             {result.unassigned > 0 && <Stat label="Unassigned" value={result.unassigned} accent="var(--danger)" />}
-            {result.notYours > 0 && <Stat label="Not your duty" value={result.notYours} />}
             {result.noDate > 0 && <Stat label="Invalid date" value={result.noDate} />}
           </div>
           {result.unmapped > 0 && (

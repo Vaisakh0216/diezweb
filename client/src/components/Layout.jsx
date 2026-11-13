@@ -23,6 +23,8 @@ export const CASE_MODULES = [
 export const REPORTS = [
   { slug: "wwg", name: "WWG" },
   { slug: "daily-edd", name: "Daily EDD" },
+  { slug: "monthly", name: "Monthly" },
+  { slug: "quarterly", name: "Quarterly" },
 ];
 
 export const initials = (n = "") =>
@@ -208,30 +210,6 @@ export default function Layout() {
           </NavLink>
           <div className="nav-label">Modules</div>
           <NavGroup
-            id="nav-edd"
-            to="/edd"
-            icon="shield"
-            label="Enhanced Due Diligence"
-            active={inEdd}
-            open={groups.edd}
-            onToggle={() => toggle("edd")}
-          >
-            <Sub to="/edd" end id="nav-edd-overview">
-              Overview
-            </Sub>
-            {!isAdmin && (
-              <Sub to="/edd/cases" id="nav-edd-cases">
-                My Work
-              </Sub>
-            )}
-            <Sub to="/edd/upload" id="nav-edd-upload">
-              Bulk Upload
-            </Sub>
-            <Sub to="/edd/master" id="nav-edd-master">
-              Master Data
-            </Sub>
-          </NavGroup>
-          <NavGroup
             id="nav-cases"
             to="/cases"
             icon="folder"
@@ -258,7 +236,10 @@ export default function Layout() {
               <Sub to="/cases/mine" id="nav-cases-mine">
                 <span className="nav-text">My Cases</span>
                 {cc.all?.mine_working_new > 0 && (
-                  <span className="nav-count" title="New or updated cases for you to work on">
+                  <span
+                    className="nav-count"
+                    title="New or updated cases for you to work on"
+                  >
                     {cc.all.mine_working_new}
                   </span>
                 )}
@@ -274,6 +255,30 @@ export default function Layout() {
             ))}
           </NavGroup>
           <NavGroup
+            id="nav-edd"
+            to="/edd"
+            icon="shield"
+            label="Enhanced Due Diligence"
+            active={inEdd}
+            open={groups.edd}
+            onToggle={() => toggle("edd")}
+          >
+            <Sub to="/edd" end id="nav-edd-overview">
+              Overview
+            </Sub>
+            {!isAdmin && (
+              <Sub to="/edd/cases" id="nav-edd-cases">
+                My Work
+              </Sub>
+            )}
+            <Sub to="/edd/upload" id="nav-edd-upload">
+              Bulk Upload
+            </Sub>
+            <Sub to="/edd/master" id="nav-edd-master">
+              Master Data
+            </Sub>
+          </NavGroup>
+          <NavGroup
             id="nav-reports"
             to="/reports"
             icon="chart"
@@ -283,7 +288,11 @@ export default function Layout() {
             onToggle={() => toggle("reports")}
           >
             {REPORTS.map((r) => (
-              <Sub key={r.slug} to={`/reports/${r.slug}`} id={`nav-report-${r.slug}`}>
+              <Sub
+                key={r.slug}
+                to={`/reports/${r.slug}`}
+                id={`nav-report-${r.slug}`}
+              >
                 {r.name}
               </Sub>
             ))}

@@ -42,7 +42,7 @@ export const INVESTIGATOR_RECS = ['Heightened Monitoring', 'SAR', 'PCC', 'Court 
 export const AGREED = 'Agreed to officer recommendation';
 export const MANAGER_RECS = [AGREED, 'Heightened Monitoring', 'PCC', 'Court Clearance Certificate', 'SAR', OTHERS];
 export const NEXT_STATUSES = { [POSSIBLE]: ['False', ESCALATE], [ESCALATE]: DECISION_STATUSES };
-export const ALERT_CATEGORIES = ['PEP', 'Sanctions', 'Law Enforcement', 'Regulatory Enforcement', 'Adverse Media', 'State Owned Enterprise', 'Other'];
+export const ALERT_CATEGORIES = ['PEP', 'Sanctions', 'Adverse Media'];
 
 export const GLOSSARY = [
   ['HM', 'Heightened Monitoring'],
